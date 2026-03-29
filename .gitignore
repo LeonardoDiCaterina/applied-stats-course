@@ -1,0 +1,15 @@
+
+*instructor*.*
+*Instructor*.*
+instructor_notes/
+
+.RData
+.Rhistory
+.Rapp.history
+.Ruserdata
+
+.Rproj.user/
+
+.DS_Store
+.AppleDouble
+.LSOverride
