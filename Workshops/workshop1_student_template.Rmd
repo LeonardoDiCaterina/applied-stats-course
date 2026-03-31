@@ -1,0 +1,179 @@
+---
+title: "Workshop 1 — R Refresher: Data, Regression & Reporting"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+---
+
+> **How to use this document:** Follow along with the instructor. Each section
+> has empty code chunks — fill them in as we go. At the end of class you will
+> have a fully working notebook documenting everything we covered.
+
+---
+
+# Setting Up: Loading Packages and Data
+
+We first load the packages we need and inspect the dataset we will be working
+with throughout this workshop.
+
+```{r load-packages}
+# Install the wooldridge package if you haven't already:
+# install.packages("wooldridge")
+# install.packages("ggplot2")
+# Load packages
+
+
+
+```
+
+```{r load-data}
+# Load the wage1 dataset from the wooldridge package
+
+# Preview the first few rows
+
+```
+
+## Exploring the Dataset
+
+```{r explore-data}
+# Check the structure of the dataset (variable types, dimensions)
+
+# Get a statistical summary of all variables
+
+```
+
+> **Key variables we care about today:**
+>
+> - `wage` — hourly wage in USD
+> - `educ` — years of education
+> - `exper` — years of potential experience
+> - `female` — dummy variable (1 = female, 0 = male)
+
+```{r basic-plots}
+# Plot the distribution of wages
+
+# Plot wage against education
+
+```
+
+---
+
+# Running a Simple Linear Regression
+
+We start with the simplest possible model: regressing wage on education only.
+
+```{r simple-lm}
+# Fit a simple linear regression: wage ~ educ
+
+# Display the summary output
+
+```
+
+## Reading the Output — Line by Line
+
+Use the space below to annotate what each part of the output means.
+Fill this in as the instructor walks through it.
+
+| Output element       | What it is                          | Link to theory    |
+|----------------------|-------------------------------------|-------------------|
+| `Estimate` (Intercept) |                                   |                   |
+| `Estimate` (educ)    |                                     | $\hat{\beta}_1$   |
+| `Std. Error`         |                                     |                   |
+| `t value`            |                                     |                   |
+| `Pr(>|t|)`           |                                     |                   |
+| `R-squared`          |                                     |                   |
+| `F-statistic`        |                                     |                   |
+
+---
+
+# Running a Multiple Linear Regression
+
+Now we add more regressors to control for other factors.
+
+```{r multiple-lm}
+# Fit a multiple regression: wage ~ educ + exper + female
+
+# Display the summary output
+
+
+```
+
+## Comparing the Two Models
+
+```{r compare-models}
+# Extract and compare R-squared values between the two models
+
+# get th eadjusted R-squared
+
+```
+
+> **Question to think about:** The coefficient on `educ` changed when we added
+> `exper` and `female`. Why? What does this tell us about the simple model?
+> *(Hint: think about Omitted Variable Bias from Lesson 1.)*
+
+---
+
+# Extracting and Using Model Components
+
+```{r model-components}
+# Extract the coefficient vector
+
+
+# Extract residuals
+
+
+# Extract fitted (predicted) values
+
+
+# Verify R-squared manually from residuals
+
+
+```
+
+---
+
+# Your Turn — Independent Exercise
+
+## Task
+
+Fit a new regression model of your choice using variables from `wage1`.
+You must include **at least three regressors**.
+
+```{r exercise-model}
+# Your regression here
+
+
+```
+
+## Interpret Your Results
+
+Write your interpretation below (use plain text, not code):
+
+**Coefficient of interest:**
+
+**Interpretation:**
+
+**Is the coefficient statistically significant? At what level?**
+
+**What might be omitted from this model? In which direction would the bias go?**
+
+
+---
+
+*Workshop 1 · Applied Statistics · `r format(Sys.Date(), "%B %Y")`*
