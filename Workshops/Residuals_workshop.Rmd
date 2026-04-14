@@ -1,0 +1,229 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## 1. The Power of Visualization
+We begin with **Anscombe’s Quartet**. The goal here is to demonstrate that summary statistics (Mean, $R^2$, Coefficients) can be identical for four datasets that look completely different. This proves that EDA (Exploratory Data Analysis) is a non-negotiable first step before trusting any model output.
+
+```{r}
+library(tidyverse)
+library(patchwork)
+library(broom)
+library(car)
+library(lmtest)
+library(sandwich)
+
+# Prepare Anscombe Data
+anscombe_tidy <- anscombe %>%
+  pivot_longer(everything(), names_to = c(".value", "set"), names_pattern = "(.)(.)")
+
+# Plotting the Quartet
+ggplot(anscombe_tidy, aes(x, y)) +
+  geom_point(color = "steelblue", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkorange") +
+  facet_wrap(~set, labeller = as_labeller(c(`1`="A: Linear", `2`="B: Curved", `3`="C: Outlier", `4`="D: High Leverage"))) +
+  labs(title = "Anscombe's Quartet", subtitle = "Same stats, different stories") +
+  theme_minimal()
+
+```
+
+
+## 2. Diagnosing OLS Failures
+When OLS assumptions are violated, the errors (residuals) are no longer "random snow." Instead, they show specific patterns:
+- **Non-linearity:** A structured curve (U-shape) suggesting the model is the wrong shape.
+- **Heteroskedasticity:** A "Fan" or "Funnel" shape suggesting the model's uncertainty changes across the data range.
+
+
+```{r}
+# Generate Data
+n <- 100
+df_fail <- data.frame(x = seq(1, 10, length.out = n)) %>%
+  mutate(
+    y_curved = 2 + 0.5 * x^2 + rnorm(n, sd = 5),
+    y_hetero = 2 + 2 * x + rnorm(n, sd = 0.6 * x)
+  )
+
+# Fit and Augment
+m_curv <- lm(y_curved ~ x, data = df_fail)
+m_het <- lm(y_hetero ~ x, data = df_fail)
+
+res_curv <- ggplot(augment(m_curv), aes(.fitted, .resid)) +
+  geom_point() + geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Plot A: Non-Linearity", subtitle = "U-shaped pattern")
+
+res_het <- ggplot(augment(m_het), aes(.fitted, .resid)) +
+  geom_point() + geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Plot B: Heteroskedasticity", subtitle = "The Fan/Funnel shape")
+
+res_curv | res_het
+```
+
+## 3. The Seesaw: Leverage & Influence
+A regression line is like a **seesaw**. 
+- The **Fulcrum** is at the point of the means $(\bar{x}, \bar{y})$.
+- **Leverage** is determined by how far a point is from that center on the X-axis. 
+- **Influence** occurs when a high-leverage point "tilts" the entire beam because it has a large residual.
+
+
+```{r}
+# The Seesaw Diagram
+df_seesaw <- data.frame(x = c(2, 3, 4, 5, 6, 17), y = c(3, 4, 3, 5, 4, 13))
+mean_x <- mean(df_seesaw$x)
+mean_y <- mean(df_seesaw$y)
+
+ggplot(df_seesaw, aes(x, y)) +
+  geom_polygon(data = data.frame(x = c(mean_x-1, mean_x+1, mean_x), 
+                                 y = c(mean_y-2, mean_y-2, mean_y)), 
+               aes(x, y), fill = "grey70") +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  geom_point(size = 4) +
+  annotate("text", x = 17, y = 14, label = "High Leverage Edge", color = "red") +
+  labs(title = "The Regression Seesaw", subtitle = "Fulcrum at (mean x, mean y)")
+```
+
+## 4. Identifying the "Bully" (Cook's Distance)
+We use **Cook's Distance** to measure how much the model coefficients change when a specific observation is removed. We generally flag points that exceed the threshold of $4/n$.
+
+```{r}
+# Create Influential Data
+df_inf <- data.frame(x = 1:15, y = 1:15 + rnorm(15, sd = 0.5))
+df_inf <- rbind(df_inf, c(25, 5)) # Add influential point
+
+m_inf <- lm(y ~ x, data = df_inf)
+df_diag <- augment(m_inf)
+
+ggplot(df_diag, aes(x = 1:nrow(df_diag), y = .cooksd)) +
+  geom_segment(aes(xend = 1:nrow(df_diag), yend = 0)) +
+  geom_point(aes(color = .cooksd > 4/nrow(df_diag)), size = 3) +
+  geom_hline(yintercept = 4/nrow(df_diag), linetype = "dashed", color = "red") +
+  scale_color_manual(values = c("black", "red")) +
+  labs(title = "Cook's Distance Plot", x = "Observation Index", y = "Cook's D") +
+  theme(legend.position = "none")
+```
+
+## 5. The State Audit (Capstone)
+Apply your diagnostic skills to the `state.x77` dataset. We will audit a model predicting Life Expectancy.
+1. **Check VIF:** Are predictors too correlated?
+2. **Find the Influencer:** Which state is "bullying" the slope?
+3. **Robustness:** Apply robust standard errors if the residuals are messy.
+
+```{r}
+# 1. Load and Clean
+states <- as.data.frame(state.x77) %>%
+  rename(Life_Exp = `Life Exp`, HS_Grad = `HS Grad`)
+
+# 2. Fit Model
+m_state <- lm(Life_Exp ~ Income + HS_Grad + Murder + Illiteracy, data = states)
+
+# 3. Check VIF (Multicollinearity)
+print("VIF Check:")
+print(vif(m_state))
+
+# 4. Check for Influential States
+df_state_diag <- augment(m_state)
+df_state_diag$.rownames <- rownames(states)
+print("Top 3 Influential States:")
+print(df_state_diag %>% arrange(desc(.cooksd)) %>% head(3) %>% select(.rownames, .cooksd))
+
+# 5. Robust Standard Errors (If Heteroskedasticity is suspected)
+print("Robust Standard Errors (HC3):")
+coeftest(m_state, vcov = vcovHC(m_state, type = "HC3"))
+```
+
+
+```{r}
+plot(m_state)
+
+```
+## 6. Remediation: Fixing the State Audit Model
+Diagnostic results are only useful if they lead to action. In the `state.x77` model, our audit revealed two critical issues that require remediation:
+1.  **Non-Linearity:** The relationship between predictors and Life Expectancy may be curved. We fix this using a **Log Transformation**.
+2.  **Influence:** Alaska was identified as a "Bully" point. we handle this via **Sensitivity Analysis** to see if our conclusions depend entirely on that one state.
+
+### --- ACTION 1: Fixing Non-Linearity with a Transformation ---
+Recall our 'y_curved' data from earlier. The linear model failed.
+Let's try a log-transformation on Y (common for exponential/growth data)
+
+```{r}
+
+# Often, Income and Population distributions are skewed. 
+# Let's try transforming the dependent variable to see if residuals stabilize.
+m_state_log <- lm(log(Life_Exp) ~ Income + HS_Grad + Murder, data = states)
+
+# Check the new residuals
+p_remediation_1 <- ggplot(augment(m_state_log), aes(.fitted, .resid)) +
+  geom_point() + 
+  geom_smooth(method = "loess", se = FALSE, color = "darkgreen") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Remediation: Log-Transformed Life Expectancy", 
+       subtitle = "Check if the residual 'snow' is more random than the linear model")
+
+p_remediation_1
+
+```
+
+### --- ACTION 2: Sensitivity Analysis (Handling the 'Bully' State) ---
+
+```{r}
+
+
+# We identified the most influential state earlier (the one with the highest Cook's D).
+# Let's see how much that ONE state changes our 'Murder' coefficient.
+
+# Identify index of the top influencer
+top_inf_idx <- which.max(cooks.distance(m_state))
+inf_name <- rownames(states)[top_inf_idx]
+
+# Fit model without that state
+m_state_reduced <- lm(Life_Exp ~ Income + HS_Grad + Murder, data = states[-top_inf_idx, ])
+
+# Compare the 'Murder' coefficient
+murder_all <- coef(m_state)["Murder"]
+murder_reduced <- coef(m_state_reduced)["Murder"]
+percent_change <- ((murder_reduced - murder_all) / murder_all) * 100
+
+cat("Sensitivity Analysis for:", inf_name, "\n")
+cat("Murder Coefficient (Full Data):", round(murder_all, 4), "\n")
+cat("Murder Coefficient (Reduced Data):", round(murder_reduced, 4), "\n")
+cat("Percent Change:", round(percent_change, 2), "%\n")
+
+# Logic: If change > 10%, that state is 'bullying' your conclusion!
+p_remediation_1
+```
+### **What did the Detective find?**
+
+Our Sensitivity Analysis of **Alaska** revealed a **17.58% change** in the Murder coefficient. 
+
+**Why does this matter?**
+In a stable model, removing one data point should not shift your results by nearly 20%. This suggests that Alaska is a "High Leverage" point—it likely has a unique combination of high income and specific geographical/demographic factors that don't follow the trend of the other 49 states.
+
+**The Decision:**
+As a researcher, you now have a choice:
+1. **Keep it:** If you want to describe the *entire* USA, you must keep Alaska but acknowledge its influence in your write-up.
+2. **Remove it:** If you want to describe the "typical" state relationship, you might exclude it, but you must be transparent about doing so.
+3. **Robust Regression:** Use a method that automatically reduces Alaska's "weight" so it can't pull the seesaw as hard.
+
+## 7. Final Workshop Reflection
+A high $R^2$ is a starting point, not a finish line. To be a "Regression Detective," you must always look under the hood of your model.
+
+| Problem | Diagnostic Tool | Remediation |
+| :--- | :--- | :--- |
+| **Non-Linearity** | Residual vs. Fitted (U-Shape) | **Log-Transform** or Polynomials |
+| **Heteroskedasticity** | Residual vs. Fitted (Funnel) | **Robust Standard Errors** (HC3) |
+| **Multicollinearity** | VIF (> 5 or 10) | **Drop** redundant variables |
+| **High Influence** | Cook's Distance (> 4/n) | **Sensitivity Analysis** |
+
+**The Detective's Rule:** Never delete data just because it is influential. Investigate it. If it is real data, your model must either account for it or you must explicitly state that your model only describes the "typical" majority.## 7. Final Workshop Reflection
+A high $R^2$ is a starting point, not a finish line. To be a "Regression Detective," you must always look under the hood of your model.
+
+| Problem | Diagnostic Tool | Remediation |
+| :--- | :--- | :--- |
+| **Non-Linearity** | Residual vs. Fitted (U-Shape) | **Log-Transform** or Polynomials |
+| **Heteroskedasticity** | Residual vs. Fitted (Funnel) | **Robust Standard Errors** (HC3) |
+| **Multicollinearity** | VIF (> 5 or 10) | **Drop** redundant variables |
+| **High Influence** | Cook's Distance (> 4/n) | **Sensitivity Analysis** |
+
+**The Detective's Rule:** Never delete data just because it is influential. Investigate it. If it is real data, your model must either account for it or you must explicitly state that your model only describes the "typical" majority.
+
