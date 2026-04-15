@@ -1,0 +1,487 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Lesson 3: Relationships & Patterns — Interactive Workshop
+
+---
+
+## **Learning Objectives**
+
+By the end of this workshop, you will be able to:
+- interpret covariance and correlation coefficients conceptually and mathematically
+- istinguish between Pearson's r and Spearman's ρ and know when to use each
+- Identify and handle non-linear relationships and outliers
+- Detect and diagnose multicollinearity in regression models
+- Apply practical workflows to assess model quality and relationship strength
+
+---
+
+## **SECTION 1: COVARIANCE — THE FOUNDATION**
+
+### **1.1 Conceptual Understanding**
+
+**Activity: Quadrant Mapping**
+
+Plot the following 5 data points on a coordinate system. Mark the means X̄ and Ȳ as perpendicular lines. Identify which quadrant each point falls into.
+
+| X | Y |
+|---|---|
+| 2 | 10 |
+| 4 | 20 |
+| 6 | 15 |
+| 8 | 25 |
+| 10 | 30 |
+
+**Questions:**
+1. Calculate X̄ and Ȳ
+2. Which quadrants contain the most points?
+3. Do you expect positive or negative covariance? Why?
+4. What does each quadrant's location tell us about the (X−X̄)(Y−Ȳ) product?
+
+**Answer Key:**
+- X̄ = 6, Ȳ = 20
+- Quadrants I and III dominate → Positive covariance
+- Points 1,4,5 in Quadrant I; Point 3 on Y-axis; Point 2 in Quadrant III-ish
+- Quadrants I & III contribute positive products; II & IV would contribute negative
+
+---
+
+### **1.2 Calculation Walkthrough**
+
+**Manual Covariance Calculation**
+
+Using the data above, calculate Cov(X,Y) step-by-step:
+
+$$\text{Cov}(X,Y) = \frac{\sum_{i=1}^{n} (X_i - \bar{X})(Y_i - \bar{Y})}{n-1}$$
+
+**Step 1: Calculate deviations**
+
+| X | Y | X−X̄ | Y−Ȳ | (X−X̄)(Y−Ȳ) |
+|---|---|------|------|-------------|
+| 2 | 10 | -4 | -10 | 40 |
+| 4 | 20 | -2 | 0 | 0 |
+| 6 | 15 | 0 | -5 | 0 |
+| 8 | 25 | 2 | 5 | 10 |
+| 10 | 30 | 4 | 10 | 40 |
+
+**Step 2: Sum the products**
+$$\sum (X_i - \bar{X})(Y_i - \bar{Y}) = 40 + 0 + 0 + 10 + 40 = 90$$
+
+**Step 3: Divide by (n−1)**
+$$\text{Cov}(X,Y) = \frac{90}{4} = 22.5$$
+
+**R Code to Verify:**
+```{r}
+X <- c(2, 4, 6, 8, 10)
+Y <- c(10, 20, 15, 25, 30)
+cov(X, Y)  # Should return 22.5
+```
+
+---
+
+### **1.3 The Scale Problem**
+
+**Activity: Scale Independence Challenge**
+
+Convert the same data to different units:
+- **Dataset A:** X in units, Y in units (original)
+- **Dataset B:** X in hundreds, Y in tens
+
+| X_orig | Y_orig | X_scaled | Y_scaled |
+|--------|--------|----------|----------|
+| 2 | 10 | 0.02 | 1.0 |
+| 4 | 20 | 0.04 | 2.0 |
+| 6 | 15 | 0.06 | 1.5 |
+| 8 | 25 | 0.08 | 2.5 |
+| 10 | 30 | 0.10 | 3.0 |
+
+**Task:** Calculate Cov(X_orig, Y_orig) and Cov(X_scaled, Y_scaled)
+
+**R Demonstration:**
+```{r}
+X_orig <- c(2, 4, 6, 8, 10)
+Y_orig <- c(10, 20, 15, 25, 30)
+
+X_scaled <- X_orig / 100
+Y_scaled <- Y_orig / 10
+
+cov_orig <- cov(X_orig, Y_orig)
+cov_scaled <- cov(X_scaled, Y_scaled)
+
+print(paste("Original Cov:", cov_orig))
+print(paste("Scaled Cov:", cov_scaled))
+print(paste("Ratio:", cov_orig / cov_scaled))  # Should be 100 * 10 = 1000
+```
+
+**Insight:** Same relationship, completely different covariance values!
+
+---
+
+## **SECTION 2: CORRELATION — THE SOLUTION**
+
+### **2.1 Why Correlation?**
+
+**Activity: Unit Cancellation Proof**
+
+Show that correlation is dimensionless:
+
+$$r = \frac{\text{Cov}(X,Y)}{\sigma_X \cdot \sigma_Y} = \frac{\text{(unit X × unit Y)}}{\text{unit X × unit Y}} = \text{dimensionless}$$
+
+Calculate correlation for both original and scaled datasets:
+
+```{r}
+# Correlation using built-in function
+r_orig <- cor(X_orig, Y_orig)
+r_scaled <- cor(X_scaled, Y_scaled)
+
+print(paste("Original r:", r_orig))
+print(paste("Scaled r:", r_scaled))
+# Both should be identical!
+```
+
+**Knowledge Check:**
+- Q: Why are the correlation coefficients identical while covariances differ?
+- Q: What is the practical advantage of scale invariance?
+
+---
+
+### **2.2 Pearson's r: Range and Proof**
+
+**Activity: Range Boundaries**
+
+**Part A: Perfect Correlation with Self**
+
+For any variable X:
+$$r(X,X) = \frac{\text{Cov}(X,X)}{\sigma_X \sigma_X} = \frac{\sigma_X^2}{\sigma_X^2} = 1$$
+
+Test this:
+```{r}
+X <- c(2, 4, 6, 8, 10)
+r_self <- cor(X, X)
+print(r_self)  # Should be 1.0
+```
+
+**Part B: Perfect Negative Correlation**
+
+For X and −X:
+$$r(X,-X) = \frac{\text{Cov}(X,-X)}{\sigma_X \sigma_X} = \frac{-\sigma_X^2}{\sigma_X^2} = -1$$
+
+Test this:
+```{r}
+X <- c(2, 4, 6, 8, 10)
+X_neg <- -X
+r_negative <- cor(X, X_neg)
+print(r_negative)  # Should be -1.0
+```
+
+**Discussion:** Why can r never exceed −1 or +1?
+
+---
+
+### **2.3 Interpreting Pearson's r**
+
+**Activity: Real Dataset Analysis**
+
+Use the provided dataset:
+
+```{r}
+# Example: Height vs Weight (synthetic economics student data)
+height_cm <- c(165, 172, 158, 180, 175, 168, 182, 170)
+income_millions <- c(1.2, 1.8, 0.9, 2.1, 1.9, 1.4, 2.3, 1.6)
+
+r_hw <- cor(height_cm, income_millions)
+print(paste("r(height, income) =", round(r_hw, 3)))
+
+# Visualize
+plot(height_cm, income_millions, 
+     main = paste("r =", round(r_hw, 3)),
+     xlab = "Height (cm)", 
+     ylab = "Income (millions)")
+abline(lm(income_millions ~ height_cm), col = "red")
+```
+
+**Interpretation Guide:**
+| r Value | Interpretation |
+|---------|---|
+| ±0.9 to ±1.0 | Very strong linear association |
+| ±0.7 to ±0.9 | Strong linear association |
+| ±0.5 to ±0.7 | Moderate linear association |
+| ±0.3 to ±0.5 | Weak linear association |
+| 0 to ±0.3 | Very weak or no linear association |
+| 0 | No linear association |
+
+---
+
+## **SECTION 3: NON-LINEARITY — WHEN PEARSON FAILS**
+
+### **3.1 Anscombe's Quartet Experience**
+
+**Activity: Calculate Statistics, Then Plot**
+
+For each of Anscombe's four datasets, calculate:
+- mean(X), mean(Y)
+- SD(X), SD(Y)
+- Pearson's r
+- Regression line: Ŷ = a + bX
+
+```{r}
+# Anscombe's Quartet
+quartet <- data.frame(
+  Dataset = rep(c("I", "II", "III", "IV"), each = 11),
+  X = c(10, 8, 13, 9, 11, 14, 6, 4, 12, 7, 5,
+        10, 8, 13, 9, 11, 14, 6, 4, 12, 7, 5,
+        10, 8, 13, 9, 11, 14, 6, 4, 12, 7, 5,
+        8, 8, 8, 8, 8, 8, 8, 19, 8, 8, 8),
+  Y = c(8.04, 6.95, 7.58, 8.81, 8.33, 9.96, 7.24, 4.26, 10.84, 4.82, 5.68,
+        9.14, 8.14, 8.74, 8.77, 9.26, 8.10, 6.13, 3.10, 9.13, 7.26, 4.74,
+        7.46, 6.77, 12.74, 7.11, 7.81, 8.84, 6.08, 5.39, 8.15, 6.42, 5.73,
+        6.58, 5.76, 7.71, 8.84, 8.47, 7.04, 5.25, 12.50, 5.56, 7.91, 6.89)
+)
+
+# Summary statistics by dataset
+by(quartet, quartet$Dataset, function(df) {
+  cat("\nDataset", df$Dataset[1], "\n")
+  cat("Mean X:", mean(df$X), "\n")
+  cat("Mean Y:", mean(df$Y), "\n")
+  cat("Correlation r:", cor(df$X, df$Y), "\n")
+  fit <- lm(Y ~ X, data = df)
+  cat("Regression:", round(fit$coefficients[1], 2), "+", round(fit$coefficients[2], 2), "* X\n")
+})
+
+# Plot all four
+library(ggplot2)
+ggplot(quartet, aes(x = X, y = Y)) +
+  geom_point(size = 3, color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  facet_wrap(~Dataset, nrow = 2) +
+  theme_minimal()
+```
+
+**Key Insight:** All four datasets have identical summary statistics, but vastly different relationships!
+
+**Discussion Questions:**
+1. Why does Pearson's r miss these differences?
+2. What does each dataset teach us about visualization?
+3. How would Spearman's ρ perform on Dataset II (curved)?
+
+---
+
+### **3.2 Detecting Non-Linearity**
+
+**Activity: Y = X² Example**
+
+Generate non-linear data and compare Pearson vs. visual assessment:
+
+```{r}
+# Generate Y = X^2 + noise
+X <- seq(-3, 3, length.out = 30)
+Y <- X^2 + rnorm(30, 0, 0.3)
+
+r_pearson <- cor(X, Y)
+
+# Plot and assess
+plot(X, Y, main = paste("Y = X² + ε | Pearson r =", round(r_pearson, 3)))
+curve(x^2, add = TRUE, col = "green", lty = 2, lwd = 2)
+abline(lm(Y ~ X), col = "red", lwd = 2)
+legend("top", c("True (X²)", "Linear Fit"), col = c("green", "red"), lty = c(2, 1))
+```
+
+**Knowledge Check:**
+- Q: Why is Pearson's r close to 0 for Y = X²?
+- Q: Would Spearman's ρ be higher? Why?
+
+---
+
+## **SECTION 4: PEARSON vs. SPEARMAN**
+
+### **4.1 Numerical Comparison**
+
+**Activity: Calculate Both Correlations**
+
+For a linear dataset and a non-linear dataset:
+
+```{r}
+# Linear data
+X_linear <- 1:10
+Y_linear <- 2 * X_linear + rnorm(10, 0, 1)
+
+r_pearson_lin <- cor(X_linear, Y_linear, method = "pearson")
+r_spearman_lin <- cor(X_linear, Y_linear, method = "spearman")
+
+cat("LINEAR DATA:\n")
+cat("Pearson r =", round(r_pearson_lin, 3), "\n")
+cat("Spearman ρ =", round(r_spearman_lin, 3), "\n\n")
+
+# Non-linear data (exponential)
+X_exp <- seq(0, 4, length.out = 10)
+Y_exp <- exp(X_exp) + rnorm(10, 0, 1)
+
+r_pearson_exp <- cor(X_exp, Y_exp, method = "pearson")
+r_spearman_exp <- cor(X_exp, Y_exp, method = "spearman")
+
+cat("EXPONENTIAL DATA:\n")
+cat("Pearson r =", round(r_pearson_exp, 3), "\n")
+cat("Spearman ρ =", round(r_spearman_exp, 3), "\n")
+```
+
+**Observation:** Spearman ≈ Pearson for linear; Spearman >> Pearson for nonlinear
+
+---
+
+### **4.2 When to Use Which?**
+
+**Activity: Decision Tree**
+
+For each scenario, decide: Use Pearson r or Spearman ρ?
+
+1. **Scenario A:** Relationship between GDP growth and inflation (both continuous, normally distributed)
+   - **Answer:** Pearson r
+   - **Why:** Both assumptions met; linear expected; easier interpretation
+
+2. **Scenario B:** Relationship between company rating (1-5 stars) and revenue
+   - **Answer:** Spearman ρ
+   - **Why:** Rating is ordinal; non-linear possible
+
+3. **Scenario C:** Income vs. years of education (contains outliers)
+   - **Answer:** Spearman ρ
+   - **Why:** Robust to outliers; captures monotonicity
+
+4. **Scenario D:** Test score vs. study hours (both continuous, linear expected)
+   - **Answer:** Pearson r
+   - **Why:** Linear relationship; normal distributions likely
+
+---
+
+## **SECTION 5: MULTICOLLINEARITY**
+
+### **5.1 Detecting Multicollinearity**
+
+**Activity: Correlation Matrix Inspection**
+
+Generate correlated predictors and compute correlation matrix:
+
+```{r}
+set.seed(42)
+n <- 100
+
+# Create correlated variables
+X1 <- rnorm(n, mean = 50, sd = 10)
+X2 <- 0.85 * X1 + rnorm(n, 0, 5)  # Highly correlated with X1
+X3 <- rnorm(n, mean = 100, sd = 15)  # Independent
+
+Y <- 10 + 0.5 * X1 + 0.3 * X2 + 0.1 * X3 + rnorm(n, 0, 2)
+
+# Correlation matrix
+cor_matrix <- cor(data.frame(X1, X2, X3, Y))
+print(cor_matrix)
+
+# Heatmap
+heatmap(cor_matrix)
+```
+
+**Interpretation Guide:**
+| Correlation | Assessment |
+|---|---|
+| \|r\| < 0.5 | Low multicollinearity (generally OK) |
+| 0.5 ≤ \|r\| < 0.8 | Moderate (investigate) |
+| \|r\| ≥ 0.8 | High multicollinearity (problematic) |
+
+---
+
+### **5.2 Variance Inflation Factor (VIF)**
+
+**Activity: Calculate and Interpret VIF**
+
+```{r}
+# Fit regression
+model <- lm(Y ~ X1 + X2 + X3)
+summary(model)
+
+# Calculate VIF
+library(car)
+vif_values <- vif(model)
+print(vif_values)
+
+# VIF Interpretation
+cat("\nVIF THRESHOLDS:\n")
+cat("VIF < 5: Low multicollinearity (acceptable)\n")
+cat("5 ≤ VIF < 10: Moderate (investigate further)\n")
+cat("VIF ≥ 10: High multicollinearity (take action)\n")
+```
+
+**Action Items Based on VIF:**
+- **VIF < 5:** Keep variables as-is
+- **5 ≤ VIF < 10:** Consider dimensionality reduction or regularization
+- **VIF ≥ 10:** Either drop one variable or combine predictors (PCA)
+
+---
+
+### **5.3 Remedies for Multicollinearity**
+
+**Activity: Compare Model Specifications**
+
+Test approaches:
+
+```{r}
+# 1. Original model (high VIF)
+model_full <- lm(Y ~ X1 + X2 + X3)
+
+# 2. Drop X2 (highly correlated with X1)
+model_reduced <- lm(Y ~ X1 + X3)
+
+
+# Compare coefficients
+cat("Full Model Coefficients:\n")
+print(coef(model_full))
+cat("\nReduced Model Coefficients:\n")
+print(coef(model_reduced))
+```
+
+---
+
+## **SUMMARY & TAKEAWAYS**
+
+### **Core Concepts Checklist**
+
+- ☐ Covariance measures joint variability but depends on scale
+- ☐ Correlation standardizes covariance to a −1 to +1 range
+- ☐ Pearson's r assumes linearity; fails for curved relationships
+- ☐ Spearman's ρ captures monotonic trends; robust to non-linearity
+- ☐ Always visualize data before computing correlations (Anscombe!)
+- ☐ Multicollinearity inflates standard errors and destabilizes coefficients
+- ☐ High VIF (>10) signals problematic multicollinearity requiring action
+
+---
+
+## **KNOWLEDGE CHECK — Final Exercise**
+
+**Scenario:** You have economic data on:
+- GDP growth (%), continuous, normally distributed
+- Unemployment rate (%), continuous, some outliers
+- Industry sector (categorical, 1-10 scale)
+- Inflation rate (%), continuous
+
+**Questions:**
+
+1. Which pairs would you examine with Pearson's r?
+2. Which with Spearman's ρ? Why?
+3. If sector code and inflation show r = 0.08, can you conclude they're unrelated? What assumption might be violated?
+4. If you fit a model with all four predictors, what multicollinearity diagnostic would you run first?
+5. A customer reports r(GDP, Unemployment) varies wildly depending on whether data is in percentages or raw decimals. What's the issue? How do you fix it?
+
+---
+
+## **SOLUTIONS AVAILABLE**
+
+Detailed solutions, R code, and data files available upon request.
+
+---
+
+**End of Workshop**
+
+*Total Time:* 150 minutes  
+*Break:* After Section 2 (10 minutes)  
+*Exercises:* 12 hands-on activities  
+*Code Examples:* 15+ reproducible R snippets
