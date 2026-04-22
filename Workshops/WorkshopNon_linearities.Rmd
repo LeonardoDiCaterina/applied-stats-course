@@ -1,0 +1,191 @@
+---
+title: "Moving Beyond the Straight Line: Non-Linear OLS in R"
+author: "Applied Statistics Workshop"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+
+```{r setup, include=FALSE}
+# Load libraries
+library(tidyverse)
+library(broom)
+
+# Set seed for reproducibility
+set.seed(42)
+
+# Simulate Wage Data (Quadratic relationship)
+age <- runif(200, 18, 65)
+wage <- -15 + 2.5 * age - 0.025 * age^2 + rnorm(200, 0, 5)
+df_wages <- data.frame(age, wage)
+
+# Simulate Retail Data (Log-Log / Constant Elasticity relationship)
+price <- runif(200, 1, 20)
+# True elasticity is -1.5
+quantity <- exp(8.2 - 1.5 * log(price) + rnorm(200, 0, 0.2))
+df_retail <- data.frame(price, quantity)
+
+```
+
+```{r}
+# Run the simple linear model
+model_linear <- lm(wage ~ age, data = df_wages)
+
+# View the results
+tidy(model_linear)
+```
+
+## 1. Setup and Data Simulation
+First, let's load our essential packages. We will use tidyverse for data manipulation and ggplot2 plotting, and broom to cleanly view our regression results.
+
+We are also going to simulate two datasets for this lab:
+
+df_wages: To test the relationship between Age and Wages.
+
+df_retail: To test the relationship between Price and Quantity Demanded.
+
+```{r}
+# Add residuals to our dataset
+df_wages <- df_wages %>% 
+  mutate(resid_linear = resid(model_linear))
+
+# Plot the residuals
+ggplot(df_wages, aes(x = age, y = resid_linear)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  geom_smooth(se = FALSE, color = "darkorange") +
+  theme_minimal() +
+  labs(title = "Residuals of Simple Linear Model",
+       subtitle = "Notice the clear U-shape pattern indicating missed curvature",
+       y = "Residuals (Error)",
+       x = "Age")
+```
+
+## Phase 1: Diagnosing the Linear Misspecification
+Let's start by fitting a standard linear model to our wage data.
+
+```{r}
+# Run the simple linear model
+model_linear <- lm(wage ~ age, data = df_wages)
+
+# View the results
+tidy(model_linear)
+```
+Is this a good fit? The best way to check if a linear model is appropriate is to look at the residuals (the errors). If the true relationship is linear, the errors should look like random static. If we missed a curve, we will see a pattern.
+
+```{r}
+# Add residuals to our dataset
+df_wages <- df_wages %>% 
+  mutate(resid_linear = resid(model_linear))
+
+# Plot the residuals
+ggplot(df_wages, aes(x = age, y = resid_linear)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  geom_smooth(se = FALSE, color = "darkorange") +
+  theme_minimal() +
+  labs(title = "Residuals of Simple Linear Model",
+       subtitle = "Notice the clear U-shape pattern indicating missed curvature",
+       y = "Residuals (Error)",
+       x = "Age")
+
+```
+
+## Phase 2: 
+The Quadratic ModelBecause we saw a U-shape in the residuals, we need to allow our OLS line to bend. We do this by adding an $Age^2$ term.In R, we use the I() function inside the lm() formula. I() stands for "AsIs" and tells R to mathematically square the variable before running the regression.
+```{r}
+# Run the quadratic model
+model_quad <- lm(wage ~ age + I(age^2), data = df_wages)
+
+# View the results
+tidy(model_quad)
+```
+
+Notice the p-value on the I(age^2) term. If it is significant (usually < 0.05), it confirms that the curve is statistically meaningful.
+
+Let's plot this curve over our raw data using ggplot2.
+
+
+```{r}
+# Plotting the raw data with a quadratic fit overlay
+ggplot(df_wages, aes(x = age, y = wage)) +
+  geom_point(alpha = 0.4) +
+  # We specify the formula inside geom_smooth to match our regression
+  geom_smooth(method = "lm", formula = y ~ x + I(x^2), color = "blue", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Quadratic Fit: Age vs. Earnings",
+       x = "Age",
+       y = "Hourly Wage ($)")
+```
+Challenge 1: Using the coefficients from the model_quad summary above, calculate the exact age at which wages peak. (Hint: Peak = -b1 / (2 * b2))
+
+---
+## Phase 3: Logarithmic Transformations and Elasticity
+Let's switch to our retail dataset to look at Price and Quantity. First, what does the raw data look like?
+```{r}
+ggplot(df_retail, aes(x = price, y = quantity)) +
+  geom_point(alpha = 0.5) +
+  theme_minimal() +
+  labs(title = "Raw Demand Data: Quantity vs. Price")
+```
+This is an exponential decay curve. If we log both variables, we can estimate a constant elasticity demand curve.
+
+In R, the log() function automatically calculates the natural logarithm (ln), which is exactly what we want.
+
+```{r}
+# Run the Log-Log model
+model_loglog <- lm(log(quantity) ~ log(price), data = df_retail)
+
+# View the results
+tidy(model_loglog)
+```
+
+
+```{r}
+# Run the Log-Log model
+model_loglog <- lm(log(quantity) ~ log(price), data = df_retail)
+
+# View the results
+tidy(model_loglog)
+```
+Because this is a log-log model, the coefficient for log(price) is our exact elasticity.
+
+Let's visualize the curve this log-log model creates on our original raw data.
+
+```{r}
+# Plotting the constant elasticity curve
+ggplot(df_retail, aes(x = price, y = quantity)) +
+  geom_point(alpha = 0.5) +
+  # This syntax tells ggplot to draw the log-log curve on the raw axes
+  geom_smooth(method = "glm", 
+              method.args = list(family = gaussian(link = "log")), 
+              formula = y ~ log(x), 
+              color = "purple", 
+              se = FALSE) +
+  theme_minimal() +
+  labs(title = "Constant Elasticity Demand Curve",
+       subtitle = "Implied by the Log-Log Model",
+       x = "Price ($)",
+       y = "Quantity Demanded")
+```
+Challenge 2:
+Based on the log(price) coefficient you estimated, is the demand for this product elastic or inelastic? If you were the store manager, would you raise or lower prices to increase total revenue?
+---
+Phase 4: Capstone Challenge
+Your Turn: Simulate or load a new dataset of your choosing (or use the built-in mtcars dataset to look at mpg vs hp).
+
+Create a scatterplot.
+
+Test a Linear, Quadratic, and Log-Log model.
+
+Write a brief paragraph below explaining which model you chose and why, referencing the statistical significance and the residual plots.
+
+```{r}
+
+```
+
+
+
