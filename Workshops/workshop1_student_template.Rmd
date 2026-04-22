@@ -34,18 +34,20 @@ with throughout this workshop.
 
 ```{r load-packages}
 # Install the wooldridge package if you haven't already:
-# install.packages("wooldridge")
-# install.packages("ggplot2")
+install.packages("wooldridge")
+install.packages("ggplot2")
 # Load packages
-
+library(wooldridge)
+library(ggplot2)
 
 
 ```
 
 ```{r load-data}
 # Load the wage1 dataset from the wooldridge package
-
+wage1_dataset = wooldridge::wage1
 # Preview the first few rows
+head(wage1_dataset)
 
 ```
 
@@ -53,8 +55,10 @@ with throughout this workshop.
 
 ```{r explore-data}
 # Check the structure of the dataset (variable types, dimensions)
+#str(wage1_dataset)
 
 # Get a statistical summary of all variables
+summary(wage1_dataset)
 
 ```
 
@@ -67,8 +71,10 @@ with throughout this workshop.
 
 ```{r basic-plots}
 # Plot the distribution of wages
-
+plot(wage1_dataset$wage, main = "Distribution of Wages", xlab = "Wage", ylab = "Frequency")
 # Plot wage against education
+plot(wage1_dataset$wage, wage1_dataset$educ,
+     main = "Distribution of Wages", xlab = "Wage", ylab = "educ")
 
 ```
 
@@ -80,8 +86,10 @@ We start with the simplest possible model: regressing wage on education only.
 
 ```{r simple-lm}
 # Fit a simple linear regression: wage ~ educ
-
+fited_model = lm(wage ~ educ, data = wage1_dataset)
 # Display the summary output
+summary_small = summary(fited_model)
+
 
 ```
 
@@ -108,9 +116,12 @@ Now we add more regressors to control for other factors.
 
 ```{r multiple-lm}
 # Fit a multiple regression: wage ~ educ + exper + female
+mlr_fit = lm(wage1_dataset$wage ~ wage1_dataset$educ + wage1_dataset$exper + wage1_dataset$female + wage1_dataset$married + wage1_dataset$exper + wage1_dataset$tenure, data = wage1_dataset) 
 
+summary_mlr_fit <- summary(mlr_fit)
+summary(mlr_fit) -> summary_mlr_fit
 # Display the summary output
-
+plot(mlr_fit)
 
 ```
 
@@ -118,8 +129,11 @@ Now we add more regressors to control for other factors.
 
 ```{r compare-models}
 # Extract and compare R-squared values between the two models
-
+summary_mlr_fit$r.squared
+summary_small$r.squared
 # get th eadjusted R-squared
+summary_mlr_fit$adj.r.squared
+summary_small$adj.r.squared
 
 ```
 
@@ -133,16 +147,30 @@ Now we add more regressors to control for other factors.
 
 ```{r model-components}
 # Extract the coefficient vector
-
+vector_of_coefficients <- coef(mlr_fit)
+vector_of_coefficients
 
 # Extract residuals
-
+residuals <- resid(mlr_fit)
 
 # Extract fitted (predicted) values
-
+fitted_values <- fitted(mlr_fit)
 
 # Verify R-squared manually from residuals
+rss <- sum(residuals^2)  # Residual Sum of Squares
+tss <- sum((wage1_dataset$wage - mean(wage1_dataset$
+wage))^2)  # Total Sum of Squares
 
+r_squared_manual <- 1 - (rss / tss)
+
+#adjusted R-squared
+n = nrow(wage1_dataset)  # Number of observations
+k = length(coef(mlr_fit)) - 1  # Number of predictors
+
+adjusted_r_squared_manual <- 1 - ((1 - r_squared_manual) * (n - 1) / (n - k - 1))
+
+adjusted_r_squared_manual
+summary_mlr_fit$adj.r.squared
 
 ```
 

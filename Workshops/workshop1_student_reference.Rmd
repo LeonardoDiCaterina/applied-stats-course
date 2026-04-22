@@ -1,0 +1,270 @@
+---
+title: "Workshop 1 — R Refresher: Data, Regression & Reporting"
+subtitle: "Complete Reference Version"
+author: "Applied Statistics"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    number_sections: true
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width  = 7,
+  fig.height = 4.5
+)
+```
+
+------------------------------------------------------------------------
+
+> **About this document:** This is the complete reference version of
+> Workshop 1. It contains all code, outputs, and interpretations. Keep
+> it — it is your blueprint for running and reporting regressions in R
+> throughout the course.
+
+------------------------------------------------------------------------
+
+# Setting Up: Loading Packages and Data
+
+```{r load-packages}
+# install.packages("wooldridge")  # run once if not installed
+library(wooldridge)
+library(ggplot2)     # for nicer plots (optional but recommended)
+```
+
+```{r load-data}
+data("wage1")        # load dataset from the wooldridge package
+head(wage1)          # first 6 rows
+```
+
+## Exploring the Dataset
+
+```{r explore-data}
+str(wage1)           # variable types and dimensions
+summary(wage1)       # min, max, mean, quartiles for every variable
+```
+
+**Key variables:**
+
+| Variable | Description                        |
+|----------|------------------------------------|
+| `wage`   | Hourly wage in USD                 |
+| `educ`   | Years of education                 |
+| `exper`  | Years of potential work experience |
+| `female` | 1 = female, 0 = male               |
+| `tenure` | Years with current employer        |
+
+```{r basic-plots}
+# Distribution of wages
+hist(wage1$wage,
+     main = "Distribution of Hourly Wages",
+     xlab = "Wage (USD/hour)",
+     col  = "steelblue",
+     border = "white")
+
+# Wage vs Education
+plot(wage1$educ, wage1$wage,
+     main = "Wage vs Years of Education",
+     xlab = "Years of Education",
+     ylab = "Hourly Wage (USD)",
+     pch  = 16,
+     col  = adjustcolor("steelblue", alpha.f = 0.5))
+abline(lm(wage ~ educ, data = wage1), col = "red", lwd = 2)
+```
+
+> **What to notice:** Wages are right-skewed — a few high earners pull
+> the mean up. Education has a positive association with wages, but
+> there is a lot of scatter. That scatter is what $\varepsilon$
+> captures.
+
+------------------------------------------------------------------------
+
+# Simple Linear Regression
+
+## Fitting and Summarising the Model
+
+```{r simple-lm}
+model_simple <- lm(wage ~ educ, data = wage1)
+summary(model_simple)
+```
+
+## Reading the Output — Complete Annotation
+
+### Coefficients table
+
+```         
+            Estimate Std. Error t value Pr(>|t|)    
+(Intercept) -0.90485    0.68497  -1.321    0.187    
+ educ        0.54136    0.05325  10.167   <2e-16 ***
+```
+
+| Element | Value | Meaning |
+|----|----|----|
+| `Estimate` (Intercept) | −0.905 | Predicted wage when `educ = 0`. Not economically meaningful here. |
+| `Estimate` (educ) | **0.541** | $\hat{\beta}_1$: one extra year of education is associated with \$0.54/hr more in wages, *ceteris paribus* (holding nothing else constant here — simple regression). |
+| `Std. Error` (educ) | 0.053 | Estimated standard deviation of $\hat{\beta}_1$ across repeated samples. |
+| `t value` | 10.15 | $t = \hat{\beta}_1 / SE = 0.541 / 0.053$. Distance from zero in standard errors. |
+| `Pr(>|t|)` | \< 2e-16 | p-value. Probability of seeing $|t| \geq 10.15$ if $H_0: \beta_1 = 0$ were true. Essentially zero. |
+
+### Model-level statistics
+
+```         
+Residual standard error: 3.378 on 524 degrees of freedom
+Multiple R-squared:  0.1648,   Adjusted R-squared:  0.1632
+F-statistic: 103.1 on 1 and 524 DF,  p-value: < 2.2e-16
+```
+
+| Element | Value | Meaning |
+|----|----|----|
+| `Residual std. error` | 3.378 | Estimate of $\sigma = \sqrt{\text{Var}(\varepsilon)}$. Average prediction error in wage units (USD/hr). |
+| `R-squared` | 0.165 | Education alone explains 16.5% of the variance in wages. Most variation is unexplained — it's in $\varepsilon$. |
+| `F-statistic` | 103.1 | Joint test: is the model as a whole useful? Equivalent to t-test here (one regressor). |
+
+> **Recall from Lesson 1:** $R^2 = 0.165$ is not "low" or "high" in
+> isolation. The important question is: what is in the remaining 83.5%?
+> Ability? Experience? Industry? That is the OVB question.
+
+------------------------------------------------------------------------
+
+# Multiple Linear Regression
+
+## Fitting the Model
+
+```{r multiple-lm}
+model_multi <- lm(wage ~ educ + exper + female, data = wage1)
+summary(model_multi)
+```
+
+## Interpretation
+
+```         
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)
+(Intercept)  -2.1238     0.7279  -2.917  0.00367 **
+educ          0.5705     0.0499  11.434  < 2e-16 ***
+exper         0.0250     0.0115   2.167  0.03060 *
+female       -1.8116     0.2649  -6.838  1.7e-11 ***
+```
+
+**Coefficient interpretations:**
+
+-   **`educ` = 0.571:** Holding experience and gender fixed, one
+    additional year of education is associated with \$0.57/hr higher
+    wages. *(Increased slightly from simple model — why? Experience and
+    gender are not perfectly correlated with education.)*
+
+-   **`exper` = 0.025:** Holding education and gender fixed, one
+    additional year of experience is associated with \$0.025/hr higher
+    wages. Statistically significant but economically modest.
+
+-   **`female` = −1.812:** Holding education and experience fixed,
+    female workers earn on average \$1.81/hr less than male workers.
+    Highly significant. This is a raw gender wage gap conditional on our
+    controls — not a causal estimate of discrimination.
+
+## Comparing Models
+
+```{r compare-models}
+cat("Simple model  R²:", round(summary(model_simple)$r.squared, 4), "\n")
+cat("Multiple model R²:", round(summary(model_multi)$r.squared, 4), "\n")
+cat("Multiple model Adj. R²:", round(summary(model_multi)$adj.r.squared, 4), "\n")
+```
+
+> **Why did R² jump?** Adding `exper` and `female` explained additional
+> variance. The adjusted R² accounts for the extra parameters — if it
+> also increases, the new variables are genuinely useful.
+
+------------------------------------------------------------------------
+
+# Extracting Model Components
+
+```{r model-components}
+# Coefficient vector
+coef(model_multi)
+
+# First 10 residuals
+head(residuals(model_multi), 10)
+
+# First 10 fitted values
+head(fitted(model_multi), 10)
+
+# Manual verification of R²
+SS_res <- sum(residuals(model_multi)^2)
+SS_tot <- sum((wage1$wage - mean(wage1$wage))^2)
+R2_manual <- 1 - SS_res / SS_tot
+cat("Manually computed R²:", round(R2_manual, 4), "\n")
+```
+
+## Residual Diagnostics (Preview)
+
+```{r residual-plot}
+plot(fitted(model_multi), residuals(model_multi),
+     main = "Residuals vs Fitted Values",
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     pch  = 16,
+     col  = adjustcolor("steelblue", alpha.f = 0.4))
+abline(h = 0, col = "red", lwd = 2)
+```
+
+> **What to look for:** Under GM5 (homoskedasticity), the spread of
+> residuals should be roughly constant across fitted values. Does it
+> look constant here? We will revisit this in a later class.
+
+------------------------------------------------------------------------
+
+# Confidence Intervals
+
+```{r confidence-intervals}
+# 95% confidence intervals for all coefficients
+confint(model_multi, level = 0.95)
+```
+
+> **Recall from Lesson 1:** The 95% CI for `educ` tells us the range of
+> $\hat{\beta}_{educ}$ values consistent with the data. If it excludes
+> zero, we reject $H_0: \beta_{educ} = 0$ at the 5% level — consistent
+> with the t-test result.
+
+------------------------------------------------------------------------
+
+# Key R Functions — Quick Reference
+
+| Function                     | Purpose                         |
+|------------------------------|---------------------------------|
+| `data("wage1")`              | Load built-in dataset           |
+| `head(df)`                   | First 6 rows                    |
+| `str(df)`                    | Structure: types and dimensions |
+| `summary(df)`                | Descriptive statistics          |
+| `lm(y ~ x1 + x2, data = df)` | Fit OLS regression              |
+| `summary(model)`             | Full regression output          |
+| `coef(model)`                | Extract coefficients            |
+| `residuals(model)`           | Extract residuals               |
+| `fitted(model)`              | Extract fitted values           |
+| `confint(model)`             | Confidence intervals            |
+| `plot(fitted, resid)`        | Residual diagnostic plot        |
+
+------------------------------------------------------------------------
+
+# R Markdown Quick Reference
+
+| Syntax                      | Output                     |
+|-----------------------------|----------------------------|
+| `**bold**`                  | **bold**                   |
+| `*italic*`                  | *italic*                   |
+| `` `code` ``                | `code`                     |
+| `# Heading 1`               | Large heading              |
+| `## Heading 2`              | Sub-heading                |
+| ```` ```{r chunk-name} ```` | Start a code chunk         |
+| `echo=FALSE`                | Run chunk, hide code       |
+| `include=FALSE`             | Run chunk, hide everything |
+| `eval=FALSE`                | Show code, don't run       |
