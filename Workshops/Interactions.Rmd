@@ -1,0 +1,292 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+# Make sure ggplot2 is loaded
+library(ggplot2)
+# Run this script to generate the 3 CSV files for the workshop
+set.seed(12345) # For reproducibility
+
+# ---------------------------------------------------------
+# Dataset 1: The Additive Fallacy (Study x Sleep)
+# DGP: Rested (D=1) = 60 + 4(Study). All-Nighter (D=0) = 50 + 0(Study)
+# ---------------------------------------------------------
+n1 <- 500
+study_hours <- round(runif(n1, 0, 10), 1)
+rest_dummy <- rbinom(n1, 1, 0.5)
+
+# The True Interaction Equation (+ random noise)
+exam_score <- 50 + (0 * study_hours) + (10 * rest_dummy) + (4 * study_hours * rest_dummy) + rnorm(n1, 0, 5)
+exam_score <- pmin(100, pmax(0, round(exam_score, 1))) # Cap between 0 and 100
+
+df_student <- data.frame(ExamScore = exam_score, StudyHours = study_hours, FullRest = rest_dummy)
+write.csv(df_student, "student_performance.csv", row.names = FALSE)
+
+# ---------------------------------------------------------
+# Dataset 2: Categorical Interaction (Salary x Degree)
+# DGP: Bachelor's (D=0) = 50 + 3(Exp). Master's (D=1) = 60 + 5(Exp)
+# ---------------------------------------------------------
+n2 <- 500
+experience <- round(runif(n2, 0, 15), 1)
+degree_dummy <- rbinom(n2, 1, 0.4) # 40% have a Master's
+
+# The True Interaction Equation (+ random noise)
+salary <- 50 + (3 * experience) + (10 * degree_dummy) + (2 * experience * degree_dummy) + rnorm(n2, 0, 8)
+
+df_salary <- data.frame(Salary = round(salary, 1), Experience = experience, MastersDegree = degree_dummy)
+write.csv(df_salary, "tech_salaries.csv", row.names = FALSE)
+
+# ---------------------------------------------------------
+# Dataset 3: Continuous Interaction (Performance = Skill x Motivation)
+# ---------------------------------------------------------
+n3 <- 500
+# Generate raw variables (Uncentered, means around 50)
+skill <- rnorm(n3, mean = 50, sd = 10)
+motivation <- rnorm(n3, mean = 50, sd = 10)
+
+# True DGP: Complex interaction where motivation acts as a heavy multiplier
+performance <- 10 + (0.5 * skill) + (0.5 * motivation) + (0.05 * skill * motivation) + rnorm(n3, 0, 15)
+
+df_productivity <- data.frame(Performance = round(performance, 1), 
+                              Skill = round(skill, 1), 
+                              Motivation = round(motivation, 1))
+write.csv(df_productivity, "employee_productivity.csv", row.names = FALSE)
+
+print("All three datasets generated successfully!")
+```
+## Activity 1: The Naive Model
+load the data and run a standard multiple regression without an interaction term.
+look at the StudyHours coefficient and tell you what it means.
+
+```{r}
+
+# 1. Load the data
+df_student <- read.csv("student_performance.csv")
+
+# 2. Run the Naive Additive Model
+model_naive <- lm(ExamScore ~ StudyHours + FullRest, data = df_student)
+
+# 3. View the results
+summary(model_naive)
+
+plot(model_naive)
+
+```
+## Activity 2:
+Add the interaction term. In R, you can simply replace the + with an *, which automatically includes the main effects and the interaction.
+
+
+Run the Interaction Model
+```{r}
+model_interaction <- lm(ExamScore ~ StudyHours * FullRest, data = df_student)
+```
+View the new results
+
+```{r}
+summary(model_interaction)
+plot(model_interaction)
+```
+Compare the R-squared of both models
+```{r}
+cat("Naive Adjusted R-Squared: ", summary(model_naive)$adj.r.squared, "\n")
+cat("Interaction Adjusted R-Squared: ", summary(model_interaction)$adj.r.squared, "\n")
+```
+## Activity 3: The Residuals
+plot the errors (residuals) of both models, color them by the Sleep Condition, and visually prove that the naive model is systematically biased.
+```{r}
+
+
+# 1. Extract the residuals from both models and save them in the dataframe
+df_student$resid_naive <- residuals(model_naive)
+df_student$resid_interaction <- residuals(model_interaction)
+
+```
+
+
+Make sure FullRest is treated as a categorical factor for plotting colors
+```{r}
+df_student$Sleep_Condition <- factor(df_student$FullRest, 
+                                     labels = c("All-Nighter (D=0)", "Full Rest (D=1)"))
+```
+Plot the Residuals of the Naive Additive Model
+```{r}
+plot_naive_res <- ggplot(df_student, aes(x = StudyHours, y = resid_naive, color = Sleep_Condition)) +
+  geom_point(alpha = 0.7, size = 3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.5) + # Adds trendlines for the errors
+  scale_color_manual(values = c("All-Nighter (D=0)" = "#D55E00", "Full Rest (D=1)" = "#0072B2")) +
+  labs(title = "Diagnostic: Naive Model Residuals",
+       subtitle = "Systematic Bias: The model makes predictable errors based on sleep",
+       x = "Study Hours",
+       y = "Residuals (Prediction Error)") +
+  theme_minimal(base_size = 14)
+
+print(plot_naive_res)
+
+```
+
+Plot the Residuals of the Interaction Model
+```{r}
+plot_inter_res <- ggplot(df_student, aes(x = StudyHours, y = resid_interaction, color = Sleep_Condition)) +
+  geom_point(alpha = 0.7, size = 3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.5) +
+  scale_color_manual(values = c("All-Nighter (D=0)" = "#D55E00", "Full Rest (D=1)" = "#0072B2")) +
+  labs(title = "Diagnostic: Interaction Model Residuals",
+       subtitle = "Random Noise: The interaction term fixes the bias",
+       x = "Study Hours",
+       y = "Residuals (Prediction Error)") +
+  theme_minimal(base_size = 14)
+
+print(plot_inter_res)
+```
+
+
+
+# Part 2: Dummy Interactions & Geometry
+run a categorical interaction, use the coefficients to write the specific regression equations for each group, and plot the non-parallel lines to visualize the intercept and slope shifts.
+
+Dataset Needed: tech_salaries.csv
+Variables:
+
+Salary: Base salary in thousands ($k)
+
+Experience: Years of experience (0 to 15)
+
+MastersDegree: 1 (Has Master's) or 0 (Bachelor's Only)
+
+
+## Activity 1: Extracting the MathInstruct the students to run the interaction model
+
+write the specific $Y = mx + b$ equation for a Bachelor's holder and the equation for a Master's holder based on the output.
+
+```{r}
+df_salary <- read.csv("tech_salaries.csv")
+
+model_salary <- lm(Salary ~ Experience * MastersDegree, data = df_salary)
+
+summary(model_salary)
+
+plot(model_salary)
+```
+## Activity 2: Visualizing the Gap
+Now that we have the equations, plot the raw data and fit the regression lines
+
+Convert the dummy variable to a factor for ggplot to color it properly
+```{r}
+
+df_salary$Degree_Label <- factor(df_salary$MastersDegree, 
+                                 labels = c("Bachelor's (D=0)", "Master's (D=1)"))
+```
+
+Plot the data with interaction trendlines
+```{r}
+
+plot_salary_interaction <- ggplot(df_salary, aes(x = Experience, y = Salary, color = Degree_Label)) +
+  geom_point(alpha = 0.5, size = 2) +
+  # geom_smooth with method="lm" automatically fits the interaction lines for us!
+  geom_smooth(method = "lm", se = FALSE, linewidth = 2) +
+  scale_color_manual(values = c("Bachelor's (D=0)" = "#0072B2", "Master's (D=1)" = "#D55E00")) +
+  labs(title = "Tech Salaries by Experience and Degree",
+       subtitle = "Visualizing the Intercept Gap and the Slope Difference",
+       x = "Years of Experience",
+       y = "Salary ($k)",
+       color = "Degree Level") +
+  theme_minimal(base_size = 14)
+
+print(plot_salary_interaction)
+```
+
+# Part 3: Continuous Moderators & The J-N Technique (Instructor Guide)
+run a continuous interaction, diagnose multicollinearity using VIF, fix the model using mean-centering, and probe the conditional effects using the Johnson-Neyman technique.
+
+Dataset Needed: employee_productivity.csv
+Variables:
+
+Performance: Job performance score (Outcome)
+
+Skill: Technical skill score (0 to 100)
+
+Motivation: Drive/Motivation score (0 to 100)
+
+
+
+```{r}
+install.packages(c("car", "interactions"))
+library(car)
+library(interactions)
+
+df_prod <- read.csv("employee_productivity.csv")
+```
+Run the interaction on the RAW (uncentered) data
+
+```{r}
+model_raw <- lm(Performance ~ Skill * Motivation, data = df_prod)
+summary(model_raw)
+
+
+```
+Check for Multicollinearity
+
+```{r}
+vif(model_raw)
+```
+
+Activity 2: Mean-Centering
+subtract the mean from both continuous predictors before multiplying them
+
+
+Mean-Center the continuous predictors
+```{r}
+# 1. 
+df_prod$Skill_c <- df_prod$Skill - mean(df_prod$Skill)
+df_prod$Motiv_c <- df_prod$Motivation - mean(df_prod$Motivation)
+```
+
+
+Rerun the model using the centered variables
+
+```{r}
+model_centered <- lm(Performance ~ Skill_c * Motiv_c, data = df_prod)
+```
+
+Check the VIF again
+
+```{r}
+vif(model_centered)
+```
+
+```{r}
+summary(model_raw)
+summary(model_centered)
+
+```
+```{r}
+plot(model_raw)
+```
+
+```{r}
+plot(model_centered)
+```
+
+
+
+## Activity 3: The Johnson-Neyman Plot
+Now that the model is centered and stable, we need to report the results. Instead of guessing arbitrary "High/Low" points, we will use the J-N technique to find the exact boundary of significance.
+
+
+```{r}
+# We are testing the effect of Skill (pred) across different levels of Motivation (modx)
+jn_results <- sim_slopes(model_centered, pred = Skill_c, modx = Motiv_c, jnplot = TRUE)
+
+# 2. Display the exact Region of Significance boundaries
+print(jn_results$jn)
+
+# 3. View the J-N Plot
+jn_results$jnplot
+```
+
