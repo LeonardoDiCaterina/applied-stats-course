@@ -1,0 +1,278 @@
+---
+title: "Applied Logistic Regression Workshop"
+author: "Applied Statistics"
+date: "2026-05-06"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    theme: readable
+---
+
+# Workshop Notebook: Applied Logistic Regression
+
+**Dataset:** `bank_loan_data.csv`  
+**Business problem:** Predict loan default using credit card balance and student status.  
+**Goal:** Build, interpret, and evaluate a logistic regression model for loan default.
+
+## Data Generator
+
+This first chunk recreates the dataset used in the workshop. It generates a known relationship between balance, student status, and default so the fitted model can be checked against the lecture values.
+
+```{r}
+set.seed(2026)
+
+N <- 5000
+
+Student <- rbinom(N, size = 1, prob = 0.3)
+
+Balance <- round(rnorm(N, mean = 1200, sd = 500))
+Balance[Balance < 0] <- 0
+Balance[Balance > 3500] <- 3500
+
+true_log_odds <- -8.5 + (0.0054 * Balance) - (0.60 * Student)
+
+true_probability <- 1 / (1 + exp(-true_log_odds))
+
+Default <- rbinom(N, size = 1, prob = true_probability)
+
+df_bank <- data.frame(
+  Default = Default,
+  Balance = Balance,
+  Student = Student
+)
+
+write.csv(df_bank, "bank_loan_data.csv", row.names = FALSE)
+cat("'bank_loan_data.csv' has been generated in your working directory!\n\n")
+
+cat("bank_loan_data.csv has been written to the working directory.\n\n")
+
+cat("--- BASELINE STATS ---\n")
+cat("Total Customers:", nrow(df_bank), "\n")
+cat("Overall Default Rate:", round(mean(df_bank$Default) * 100, 1), "%\n\n")
+
+cat("--- MODEL VERIFICATION ---\n")
+test_model <- glm(Default ~ Balance + Student, data = df_bank, family = "binomial")
+
+print(round(coef(test_model), 4))
+
+bank_loan_data <- df_bank
+```
+
+## Section 0: Environment Setup & Data Ingestion
+
+This section loads the packages, reads the dataset, and checks the class balance before any model is fitted. The default rate tells us how imbalanced the target is and gives a baseline for later comparison.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(pROC)
+
+data_path <- "bank_loan_data.csv"
+if (!file.exists(data_path)) {
+  stop("Could not find bank_loan_data.csv. Place it in the same folder as this workshop notebook.")
+}
+
+bank_loan_data <- read.csv(data_path, stringsAsFactors = FALSE)
+```
+
+### Task
+
+Run `head()` and `summary()` on the dataset to explore the variables. Then check the baseline default rate:
+
+```{r}
+head(bank_loan_data)
+summary(bank_loan_data)
+mean(bank_loan_data$Default == 1, na.rm = TRUE)
+```
+
+## Section 1: The OLS Catastrophe (Proving the Theory)
+
+Ordinary Least Squares produces values on the real line, which makes sense for a continuous outcome but not for a probability. This section shows the failure directly with a binary target.
+
+### Task
+
+Fit a standard linear model using `lm(Default ~ Balance)`.
+
+Create a test dataframe with two extreme customers:
+- Customer A: `Balance = 3500`
+- Customer B: `Balance = 0`
+
+Use `predict()` to estimate their default risk.
+
+```{r}
+ols_model <- lm(Default ~ Balance, data = bank_loan_data)
+summary(ols_model)
+
+test_customers <- data.frame(
+  Balance = c(3500, 0)
+)
+
+ols_predictions <- predict(ols_model, newdata = test_customers)
+ols_predictions
+```
+
+
+Look at the predictions for Customer A and Customer B. Why are these numbers completely invalid for a business report?
+
+## Section 2: The Logistic Engine
+
+Logistic regression keeps predictions inside the probability range by modeling the log-odds and estimating the coefficients with maximum likelihood.
+
+### Task
+
+Fit a logistic regression model using `glm(..., family = binomial(link = "logit"))`.
+Print the `summary()` of the model.
+
+```{r}
+logit_model <- glm(Default ~ Balance, data = bank_loan_data, family = binomial(link = "logit"))
+summary(logit_model)
+```
+
+
+Look at the coefficient for `Balance` (for example, `0.0054`). Does this mean that every additional dollar adds 0.54% to the probability of default? If not, what units is this coefficient actually in?
+
+## Section 3: Translation & The Golden Sentence
+
+The coefficient lives on the log-odds scale, which is hard to explain in business terms. Converting it with `exp()` turns it into an odds ratio.
+
+### Task
+
+Extract the coefficient for `Balance`.
+Use the `exp()` function to exponentiate the coefficient.
+
+```{r}
+balance_coef <- coef(logit_model)["Balance"]
+balance_odds_ratio <- exp(balance_coef)
+
+balance_coef
+balance_odds_ratio
+```
+
+
+Write the "Golden Sentence" for this finding. For example: "For every $1 increase in balance, the odds of default are ..."
+
+## Section 4: Multiple Predictors (Controlling for Groups)
+
+Balance is not the only driver of default risk. Student status adds a second effect and lets the model compare borrowers at the same balance.
+
+### Task
+
+Fit a new model: `glm(Default ~ Balance + Student)`.
+Exponentiate the `Student` coefficient.
+
+```{r}
+if (!"Student" %in% names(bank_loan_data)) {
+  stop("This workshop expects a Student column in bank_loan_data.csv.")
+}
+
+logit_model_student <- glm(Default ~ Balance + Student, data = bank_loan_data, family = binomial(link = "logit"))
+summary(logit_model_student)
+
+student_coef <- coef(logit_model_student)["Student"]
+student_odds_ratio <- exp(student_coef)
+
+student_coef
+student_odds_ratio
+```
+
+The exponentiated coefficient for `Student` is roughly `0.54`. Because this number is less than 1, what does it mean for a student's risk compared to a non-student, assuming they have the exact same credit card balance?
+
+## Section 5: Generating Probabilities & Business Decisions
+
+A fitted model becomes useful when it produces probabilities that can be converted into approve or deny decisions. This section turns model output into a policy rule.
+
+### Task
+
+Use `predict(model, type = "response")` to generate probabilities for the entire dataset.  
+Instructor note: remind yourself what happens if you forget `type = "response"`.
+
+Create a new column called `Decision_50`. Use `ifelse()` to predict 1 (Deny) if the probability is greater than 0.50, and 0 (Approve) if it is less than 0.50.
+Generate a confusion matrix using `table()`.
+
+```{r}
+bank_loan_data$Predicted_Probability <- predict(logit_model_student, newdata = bank_loan_data, type = "response")
+
+bank_loan_data$Decision_50 <- ifelse(bank_loan_data$Predicted_Probability > 0.50, 1, 0)
+
+conf_matrix_50 <- table(
+  Predicted = bank_loan_data$Decision_50,
+  Actual = bank_loan_data$Default
+)
+conf_matrix_50
+```
+
+Identify the False Positives and False Negatives in your matrix. If a defaulted loan costs the bank $10,000, and a lost good customer only costs the bank $500 in lost interest, is `0.50` a smart threshold?
+
+## Section 6: Threshold Optimization
+
+The threshold determines how the bank balances missed defaults against rejected good borrowers. Lowering the cutoff changes that trade-off.
+
+### Task
+
+Create a new column called `Decision_15` using a threshold of `0.15`.
+Generate a new confusion matrix.
+
+```{r}
+bank_loan_data$Decision_15 <- ifelse(bank_loan_data$Predicted_Probability > 0.15, 1, 0)
+
+conf_matrix_15 <- table(
+  Predicted = bank_loan_data$Decision_15,
+  Actual = bank_loan_data$Default
+)
+conf_matrix_15
+```
+
+Compare this matrix to the previous one. What happened to our False Negatives (defaulters we missed)? What happened to our False Positives (good customers we angered)? Explain the trade-off.
+
+## Section 7: The Ultimate Grade (ROC & AUC)
+
+ROC and AUC summarize model quality across every possible threshold instead of only one cutoff. They show how well the scores separate defaulters from non-defaulters.
+
+### Task
+
+Use the `roc()` function from the `pROC` package.
+Use `plot()` to visualize the ROC curve.
+Use `auc()` to calculate the Area Under the Curve.
+
+```{r}
+roc_obj <- roc(response = bank_loan_data$Default, predictor = bank_loan_data$Predicted_Probability)
+plot(roc_obj, main = "ROC Curve for Logistic Regression", col = "steelblue", lwd = 2)
+auc_value <- auc(roc_obj)
+auc_value
+```
+
+What is the model's AUC score? Based on the `0.5` (Coin Toss) to `1.0` (Psychic) scale, how would you rate the quality of this classifier?
+
+## Section 8: The "Boss's Desk" Challenge (Independent Practice)
+
+This final exercise asks for a decision on a new applicant using the fitted model. The result should be a probability first and a business recommendation second.
+
+**Scenario:** A new applicant just walked into the branch. They are NOT a student, and they have a credit card balance of $2,200.
+
+**Instructions:** Write the code to predict their exact probability of default. Based on a conservative 20% risk threshold, do you approve or deny their loan?
+
+**Output expected:** Create the new data frame, run the prediction, and write a one-sentence business recommendation.
+
+```{r}
+new_applicant <- data.frame(
+  Balance = 2200,
+  Student = 0
+)
+
+new_applicant_probability <- predict(logit_model_student, newdata = new_applicant, type = "response")
+new_applicant_probability
+
+if (new_applicant_probability > 0.20) {
+  recommendation <- "Deny the loan: the predicted default risk is above the 20% threshold."
+} else {
+  recommendation <- "Approve the loan: the predicted default risk is below the 20% threshold."
+}
+
+recommendation
+```
+
+### Final Reflection
+
+Write one sentence for your manager: What is the predicted probability, and should the loan be approved or denied?
