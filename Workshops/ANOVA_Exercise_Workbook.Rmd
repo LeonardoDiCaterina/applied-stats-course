@@ -1,0 +1,180 @@
+---
+title: "Coding Exercise: Best Predictor via One-Way ANOVA"
+subtitle: "Instructions, Hints, and Full Solution"
+author: "Applied Statistics"
+date: "May 12, 2026"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+# Exercise Instructions
+
+You are given a classification-style setup where the target is a categorical group variable.
+
+Your goal is to identify which numeric feature has the strongest group-separation signal using **One-Way ANOVA**.
+
+## Requirements
+
+1. Create a synthetic dataframe with **200 observations**.
+2. Include one categorical variable named `Treatment_Group` with **3 levels**.
+3. Include four continuous numeric features with different mean shifts and/or variances:
+   - `Feature_1`
+   - `Feature_2`
+   - `Feature_3`
+   - `Feature_4`
+4. Use an iterative approach (`for` loop or `lapply`) to run `aov()` for each feature against `Treatment_Group`.
+5. Extract the **F-statistic** and **p-value** from each ANOVA model.
+6. Build a comparison table and rank features by descending F-statistic.
+7. Select the top-ranked feature as the one with the strongest predictive separation.
+8. Create a `ggplot2` boxplot of the top feature by `Treatment_Group`.
+
+## ANOVa theory
+
+In ANOVA, you compare between-group variation to within-group variation:
+
+$$
+F = \frac{\text{variance between groups}}{\text{variance within groups}}
+$$
+
+A higher F-statistic indicates clearer group separation relative to noise.
+
+---
+
+# Hints
+
+- Build formulas dynamically with:
+
+```{r, eval=FALSE}
+as.formula(paste(feature_name, "~ Treatment_Group"))
+```
+
+- Extract ANOVA metrics from `summary(aov_model)[[1]]`:
+
+```{r, eval=FALSE}
+fit <- aov(feature ~ Treatment_Group, data = df)
+sm <- summary(fit)[[1]]
+f_val <- sm["Treatment_Group", "F value"]
+p_val <- sm["Treatment_Group", "Pr(>F)"]
+```
+
+- Rank by descending F-statistic:
+
+```{r, eval=FALSE}
+results <- results[order(-results$F_statistic), ]
+```
+
+- Use a dynamic y mapping in `ggplot2`:
+
+```{r, eval=FALSE}
+aes(y = .data[[top_feature]])
+```
+
+---
+
+# Full Solution Code (Commented)
+
+```{r setup, message=FALSE, warning=FALSE}
+# Load required package
+library(ggplot2)
+
+# Ensure reproducibility
+set.seed(123)
+```
+## 1) Generate synthetic data
+
+```{r generate-data}
+
+n <- 200
+
+# Grouping variable with 3 levels
+Treatment_Group <- factor(
+  sample(c("Control", "Treatment_A", "Treatment_B"), n, replace = TRUE)
+)
+
+# Group-specific means for each feature
+# Feature_1: strongest separation
+# Feature_2: moderate separation
+# Feature_3: weak separation with high noise
+# Feature_4: very weak separation
+mu_f1 <- c(Control = 50, Treatment_A = 62, Treatment_B = 74)
+mu_f2 <- c(Control = 30, Treatment_A = 35, Treatment_B = 40)
+mu_f3 <- c(Control = 100, Treatment_A = 102, Treatment_B = 104)
+mu_f4 <- c(Control = 10, Treatment_A = 10.5, Treatment_B = 11)
+
+# Build numeric features with varying within-group variance
+Feature_1 <- rnorm(n, mean = mu_f1[Treatment_Group], sd = 4)
+Feature_2 <- rnorm(n, mean = mu_f2[Treatment_Group], sd = 8)
+Feature_3 <- rnorm(n, mean = mu_f3[Treatment_Group], sd = 14)
+Feature_4 <- rnorm(n, mean = mu_f4[Treatment_Group], sd = 6)
+
+# Final dataframe
+df <- data.frame(
+  Treatment_Group,
+  Feature_1,
+  Feature_2,
+  Feature_3,
+  Feature_4
+)
+
+# Preview
+head(df)
+```
+
+## 2) Iteratively run ANOVA for each numeric feature
+
+```{r iterative-anova}
+
+feature_names <- c("Feature_1", "Feature_2", "Feature_3", "Feature_4")
+
+anova_list <- lapply(feature_names, function(feat) {
+  # Dynamic formula: feat ~ Treatment_Group
+  fml <- as.formula(paste(feat, "~ Treatment_Group"))
+  fit <- aov(fml, data = df)
+  sm <- summary(fit)[[1]]
+
+  data.frame(
+    Feature = feat,
+    F_statistic = sm["Treatment_Group", "F value"],
+    p_value = sm["Treatment_Group", "Pr(>F)"],
+    row.names = NULL
+  )
+})
+
+anova_results <- do.call(rbind, anova_list)
+anova_results
+```
+## 3) Rank features by F-statistic (highest = strongest signal)
+
+```{r rank-features}
+
+anova_results <- anova_results[order(-anova_results$F_statistic), ]
+anova_results$Rank <- seq_len(nrow(anova_results))
+
+anova_results <- anova_results[, c("Rank", "Feature", "F_statistic", "p_value")]
+anova_results
+
+# Top-performing feature
+top_feature <- anova_results$Feature[1]
+cat("Top feature by ANOVA F-statistic:", top_feature, "\n")
+```
+## 4) Visualize top-performing feature
+```{r plot-top-feature, fig.width=8, fig.height=4.5}
+
+ggplot(df, aes(x = Treatment_Group, y = .data[[top_feature]], fill = Treatment_Group)) +
+  geom_boxplot(alpha = 0.8) +
+  labs(
+    title = paste("Top Feature by One-Way ANOVA:", top_feature),
+    x = "Treatment Group",
+    y = top_feature
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+---
+
+1. Why can a feature with larger mean differences still fail to rank first?
+2. How does within-group variance affect the F-statistic?
+3. Would scaling a feature (e.g., multiplying by 10) change ANOVA conclusions?
