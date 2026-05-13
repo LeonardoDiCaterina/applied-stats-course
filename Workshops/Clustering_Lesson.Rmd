@@ -1,0 +1,921 @@
+---
+title: "Applied Statistics Lesson 7: Clustering & Distance Metrics"
+author: "Lazarski University"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6,
+  dpi = 300
+)
+```
+
+This setup chunk configures `knitr` options and plotting defaults used throughout the notebook (figure size, DPI, and message/warning behaviour).
+
+# 1. Setup & Data Preparation
+
+## Load Required Libraries
+# Load the libraries used for plotting, clustering, and distance calculations.
+```{r}
+# Core tidyverse
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(tidyr)
+
+# Clustering
+library(cluster)      # silhouette, daisy
+library(ggdendro)     # dendrogram visualization
+
+# Distance metrics
+library(proxy)        # distance calculations
+library(clusterSim)   # cluster validity indices (index.DB, index.G1)
+
+set.seed(42)
+```
+
+## Generate Synthetic Dataset
+
+We'll create the same 120-point, 3-cluster dataset used in the lesson slides.
+
+```{r}
+# Generate synthetic 3-cluster data
+n_per_cluster <- 40
+clusters_3 <- data.frame(
+  x = c(
+    rnorm(n_per_cluster, mean = 2, sd = 0.6),
+    rnorm(n_per_cluster, mean = 7, sd = 0.6),
+    rnorm(n_per_cluster, mean = 7, sd = 0.6)
+  ),
+  y = c(
+    rnorm(n_per_cluster, mean = 2, sd = 0.6),
+    rnorm(n_per_cluster, mean = 7, sd = 0.6),
+    rnorm(n_per_cluster, mean = 2, sd = 0.6)
+  ),
+  true_cluster = rep(1:3, each = n_per_cluster)
+)
+
+# Display data summary
+head(clusters_3, 10)
+summary(clusters_3[, 1:2])
+
+# Visualize true clusters
+ggplot(clusters_3, aes(x = x, y = y, color = factor(true_cluster))) +
+  geom_point(size = 3, alpha = 0.7) +
+  scale_color_manual(values = c("#1A3A6B", "#4A90D9", "#B03A2E")) +
+  labs(
+    title = "True Clustering (3 Clusters)",
+    color = "True Cluster",
+    x = "Feature 1 (x)",
+    y = "Feature 2 (y)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+  The plot above shows the synthetic dataset with the true cluster labels; we use this dataset to demonstrate clustering algorithms and evaluation metrics.
+
+---
+
+# 2. Distance Metrics
+
+## 2.1 Distance Matrix Calculation
+
+### Euclidean Distance
+
+**Formula:** $d_{Euclidean}(i,j) = \sqrt{\sum_{k=1}^{p} (x_{ik} - x_{jk})^2}$
+
+```{r}
+# Calculate Euclidean distance matrix
+euclidean_dist <- dist(clusters_3[, 1:2], method = "euclidean")
+
+# Display a subset
+as.matrix(euclidean_dist)[1:5, 1:5]
+```
+
+This computes pairwise Euclidean distances between samples; the resulting matrix is symmetric and will be used by hierarchical clustering and silhouette calculations.
+
+### Manhattan Distance
+
+**Formula:** $d_{Manhattan}(i,j) = \sum_{k=1}^{p} |x_{ik} - x_{jk}|$
+
+```{r}
+# Calculate Manhattan distance matrix
+manhattan_dist <- dist(clusters_3[, 1:2], method = "manhattan")
+
+# Display a subset
+as.matrix(manhattan_dist)[1:5, 1:5]
+```
+
+Manhattan (L1) distances are shown here for comparison; they measure absolute coordinate differences and may behave differently than Euclidean distances on the same data.
+
+### Cosine Distance
+
+**Formula:** $d_{Cosine}(i,j) = 1 - \frac{\mathbf{x}_i \cdot \mathbf{x}_j}{||\mathbf{x}_i|| \cdot ||\mathbf{x}_j||}$
+
+```{r}
+# Calculate Cosine distance using proxy package
+cosine_dist <- dist(clusters_3[, 1:2], method = "cosine")
+
+# Display a subset
+as.matrix(cosine_dist)[1:5, 1:5]
+```
+
+Cosine distances focus on angular differences between vectors (orientation), which can be helpful when magnitude differences are not meaningful.
+
+## 2.2 Distance Matrix Visualization
+
+The following chunk prepares the Euclidean distance matrix for visualization and plots a heatmap to inspect pairwise similarities.
+
+```{r}
+# Convert to matrix for heatmap
+dist_matrix <- as.matrix(euclidean_dist)
+
+# Create heatmap using ggplot2
+dist_df <- data.frame(
+  i = rep(1:nrow(dist_matrix), times = ncol(dist_matrix)),
+  j = rep(1:ncol(dist_matrix), each = nrow(dist_matrix)),
+  distance = c(dist_matrix)
+)
+
+ggplot(dist_df, aes(x = j, y = i, fill = distance)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "#0D1B3E") +
+  labs(
+    title = "Euclidean Distance Matrix Heatmap",
+    x = "Sample Index",
+    y = "Sample Index",
+    fill = "Distance"
+  ) +
+  theme_minimal() +
+  coord_fixed()
+```
+
+  The heatmap visually highlights which sample pairs are close or far in Euclidean space; block structure often indicates cluster membership.
+
+## 2.3 Distance Comparison
+# Compare numeric values from different distance metrics for a small set of pairs and compute correlations across methods.
+
+```{r}
+# Compare distances for the first 10 point pairs
+comparison <- data.frame(
+  Pair = 1:10,
+  Euclidean = as.vector(euclidean_dist)[1:10],
+  Manhattan = as.vector(manhattan_dist)[1:10],
+  Cosine = as.vector(cosine_dist)[1:10]
+)
+
+print(comparison)
+
+# Correlation between distance methods
+cat("\nCorrelation between distance methods:\n")
+dist_comparison <- cbind(
+  Euclidean = as.vector(euclidean_dist),
+  Manhattan = as.vector(manhattan_dist),
+  Cosine = as.vector(cosine_dist)
+)
+cor(dist_comparison)
+```
+
+Comparing distances and their correlations helps understand how metric choice affects perceived similarity between points.
+
+---
+
+# 3. K-Means Clustering
+
+## 3.1 Manual K-Means Implementation
+
+Let's implement K-Means from scratch to understand the algorithm:
+
+```{r}
+# Manual K-Means function (robust to data.frames / matrices)
+kmeans_manual <- function(data, k, max_iter = 100, tol = 1e-4, nstart = 1) {
+  # Ensure numeric matrix input
+  if (is.data.frame(data)) data <- as.matrix(data)
+  if (!is.matrix(data)) stop("`data` must be a matrix or data.frame")
+  if (!is.numeric(data)) stop("`data` must contain numeric values only")
+
+  results <- list()
+  best_wss <- Inf
+
+  n_samples <- nrow(data)
+  n_features <- ncol(data)
+
+  for (start in 1:nstart) {
+    # Initialize: random starting centroids (rows from data)
+    centroid_indices <- sample(1:n_samples, k, replace = FALSE)
+    centroids <- data[centroid_indices, , drop = FALSE]
+
+    wss_history <- numeric(max_iter)
+
+    for (iter in 1:max_iter) {
+      # Step 1: Assign points to nearest centroid (squared Euclidean distances)
+      distances <- sapply(1:k, function(j) rowSums((data - matrix(centroids[j, ], n_samples, n_features, byrow = TRUE))^2))
+      assignments <- apply(distances, 1, which.min)
+
+      # Step 2: Calculate within-cluster sum of squares (WSS)
+      wss <- sum(sapply(1:k, function(c_idx) {
+        cluster_points <- data[assignments == c_idx, , drop = FALSE]
+        if (nrow(cluster_points) == 0) return(0)
+        sum(rowSums((cluster_points - matrix(centroids[c_idx, ], nrow(cluster_points), n_features, byrow = TRUE))^2))
+      }))
+      wss_history[iter] <- wss
+
+      # Step 3: Update centroids
+      new_centroids <- t(sapply(1:k, function(c_idx) {
+        cluster_points <- data[assignments == c_idx, , drop = FALSE]
+        if (nrow(cluster_points) == 0) {
+          centroids[c_idx, ]
+        } else {
+          colMeans(cluster_points)
+        }
+      }))
+
+      # Check convergence (centroid movement)
+      centroid_shift <- sum((new_centroids - centroids)^2)
+      centroids <- new_centroids
+
+      if (centroid_shift < tol) {
+        wss_history <- wss_history[1:iter]
+        break
+      }
+    }
+
+    # Store results from this run if better
+    if (wss < best_wss) {
+      best_wss <- wss
+      results$centroids <- centroids
+      results$assignments <- assignments
+      results$wss_history <- wss_history
+      results$wss <- wss
+    }
+  }
+
+  return(results)
+}
+
+# Run manual K-Means with k=3
+km_manual <- kmeans_manual(clusters_3[, 1:2], k = 3, nstart = 10)
+
+# View results
+cat("Manual K-Means (k=3):\n")
+cat("Final WSS:", km_manual$wss, "\n")
+cat("Assignments:", table(km_manual$assignments), "\n")
+```
+
+## 3.2 Built-in K-Means Function
+
+```{r}
+# Use R's built-in kmeans function
+km_builtin <- kmeans(clusters_3[, 1:2], centers = 3, nstart = 50, iter.max = 300)
+
+# Summary
+cat("Built-in K-Means (k=3):\n")
+cat("Within-cluster sum of squares (WSS):", km_builtin$tot.withinss, "\n")
+cat("Cluster sizes:", km_builtin$size, "\n")
+print(km_builtin$centers)
+```
+
+## 3.3 K-Means Visualization: Step-by-Step
+
+```{r}
+# Create 2x2 visualization showing K-Means iterations
+plot_kmeans_iteration <- function(data, km_result, iteration_title) {
+  
+  plot_data <- data.frame(
+    x = data$x,
+    y = data$y,
+    cluster = factor(km_result$cluster),
+    true_cluster = factor(data$true_cluster)
+  )
+  
+  p <- ggplot(plot_data, aes(x = x, y = y, color = cluster)) +
+    geom_point(size = 3, alpha = 0.7) +
+    geom_point(
+      data = data.frame(
+        x = km_result$centers[, 1],
+        y = km_result$centers[, 2],
+        cluster = factor(1:nrow(km_result$centers))
+      ),
+      aes(fill = cluster),
+      shape = 23,
+      size = 8,
+      color = "black",
+      stroke = 2
+    ) +
+    scale_color_manual(values = c("#1A3A6B", "#4A90D9", "#B03A2E")) +
+    scale_fill_manual(values = c("#1A3A6B", "#4A90D9", "#B03A2E")) +
+    labs(
+      title = iteration_title,
+      x = "Feature 1",
+      y = "Feature 2",
+      color = "Cluster",
+      fill = "Centroid"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+  
+  return(p)
+}
+
+# Visualize final K-Means result
+plot_kmeans_iteration(clusters_3, km_builtin, "K-Means Clustering (k=3)")
+```
+
+## 3.4 Convergence Criteria Analysis
+
+```{r}
+# Explore convergence with different parameters
+convergence_test <- data.frame(
+  k = numeric(),
+  converged_iter = numeric(),
+  total_wss = numeric(),
+  tol = numeric()
+)
+
+for (k_val in 2:6) {
+  for (tol_val in c(1e-3, 1e-4, 1e-5)) {
+    km_temp <- kmeans_manual(clusters_3[, 1:2], k = k_val, max_iter = 500, tol = tol_val, nstart = 5)
+    convergence_test <- rbind(convergence_test, data.frame(
+      k = k_val,
+      converged_iter = length(km_temp$wss_history),
+      total_wss = km_temp$wss,
+      tol = tol_val
+    ))
+  }
+}
+
+print(convergence_test)
+
+# Visualization: WSS vs iterations for different k values
+wss_progress <- data.frame()
+for (k_val in 2:5) {
+  km_temp <- kmeans_manual(clusters_3[, 1:2], k = k_val, max_iter = 300, nstart = 10)
+  wss_progress <- rbind(wss_progress, data.frame(
+    iteration = 1:length(km_temp$wss_history),
+    wss = km_temp$wss_history,
+    k = k_val
+  ))
+}
+
+ggplot(wss_progress, aes(x = iteration, y = wss, color = factor(k))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~k, scales = "free_y") +
+  scale_color_manual(values = c("#1A3A6B", "#4A90D9", "#B03A2E", "#C9A84C")) +
+  labs(
+    title = "K-Means: WSS Progress by Iteration",
+    x = "Iteration",
+    y = "Within-Cluster SS",
+    color = "k"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 4. Hierarchical Clustering
+
+## 4.1 Hierarchical Clustering with Different Linkages
+
+```{r}
+# Perform hierarchical clustering with different linkage methods
+linkage_methods <- c("single", "complete", "average", "ward.D2")
+
+hclust_results <- lapply(linkage_methods, function(method) {
+  hclust(euclidean_dist, method = method)
+})
+
+names(hclust_results) <- linkage_methods
+
+# Print dendrogram for Ward linkage
+print(hclust_results$ward.D2)
+```
+
+## 4.2 Dendrogram Visualization
+
+```{r}
+# Single dendrogram for Ward linkage
+ggdendrogram(hclust_results$ward.D2, theme_dendro = FALSE) +
+  labs(
+    title = "Hierarchical Clustering Dendrogram (Ward Linkage)",
+    y = "Height (Distance)"
+  ) +
+  theme_minimal()
+```
+
+## 4.3 Linkage Methods Comparison
+
+```{r}
+# Create dendrograms for all linkage methods side-by-side
+plots <- lapply(linkage_methods, function(method) {
+  ggdendrogram(hclust_results[[method]], theme_dendro = FALSE) +
+    labs(title = paste(toupper(method), "Linkage")) +
+    theme_minimal() +
+    theme(plot.title = element_text(size = 10, face = "bold"))
+})
+
+wrap_plots(plots, ncol = 2) +
+  plot_annotation(title = "Comparison of Linkage Methods")
+```
+
+## 4.4 Cluster Assignment from Dendrogram
+
+```{r}
+# Cut dendrogram to get cluster assignments (k=3)
+clusters_from_hclust <- cutree(hclust_results$ward.D2, k = 3)
+
+# Visualize clusters from hierarchical clustering
+hclust_data <- data.frame(
+  x = clusters_3$x,
+  y = clusters_3$y,
+  cluster = factor(clusters_from_hclust)
+)
+
+ggplot(hclust_data, aes(x = x, y = y, color = cluster)) +
+  geom_point(size = 3, alpha = 0.7) +
+  scale_color_manual(values = c("#1A3A6B", "#4A90D9", "#B03A2E")) +
+  labs(
+    title = "Hierarchical Clustering Result (k=3, Ward Linkage)",
+    x = "Feature 1",
+    y = "Feature 2",
+    color = "Cluster"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+## 4.5 Dendrogram with Cut Line
+
+```{r}
+# Dendrogram with horizontal cut line for k=3
+dend_data <- dendro_data(hclust_results$ward.D2)
+
+# Cut height for k=3
+cut_height <- sort(hclust_results$ward.D2$height, decreasing = TRUE)[2]
+
+ggplot() +
+  geom_segment(data = segment(dend_data), aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_point(data = label(dend_data), aes(x = x, y = y), size = 3, alpha = 0.7) +
+  geom_hline(yintercept = cut_height, linetype = "dashed", color = "red", size = 1.2) +
+  labs(
+    title = "Dendrogram with Cut Line (k=3)",
+    y = "Height (Distance)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank())
+```
+
+---
+
+# 5. Cluster Evaluation Metrics
+
+## 5.1 Within-Cluster Sum of Squares (WSS)
+
+**Formula:** $WSS = \sum_{i=1}^{k} \sum_{j \in C_i} ||x_j - \mu_i||^2$
+
+```{r}
+# Calculate WSS for k=2 to 10
+wss_values <- numeric(10)
+for (k in 1:10) {
+  km_k <- kmeans(clusters_3[, 1:2], centers = k, nstart = 50)
+  wss_values[k] <- km_k$tot.withinss
+}
+
+wss_df <- data.frame(
+  k = 1:10,
+  wss = wss_values
+)
+
+# Visualize WSS vs k
+ggplot(wss_df, aes(x = k, y = wss)) +
+  geom_line(size = 1, color = "#1A3A6B") +
+  geom_point(size = 3, color = "#1A3A6B") +
+  geom_vline(xintercept = 3, linetype = "dashed", color = "red", size = 1) +
+  annotate("text", x = 3.2, y = max(wss_df$wss) * 0.95, label = "Elbow", size = 4, color = "red") +
+  labs(
+    title = "Elbow Method: Within-Cluster Sum of Squares",
+    x = "Number of Clusters (k)",
+    y = "Within-Cluster Sum of Squares (WSS)"
+  ) +
+  theme_minimal()
+
+print(wss_df)
+```
+
+## 5.2 Silhouette Score: Calculation
+
+**Formula for each point i:**
+- $a(i)$ = average distance to points in same cluster
+- $b(i)$ = minimum average distance to points in other clusters
+- $s(i) = \frac{b(i) - a(i)}{max(a(i), b(i))}$
+
+```{r}
+# Calculate silhouette scores for different k values
+silhouette_scores <- data.frame()
+
+for (k in 2:6) {
+  km_k <- kmeans(clusters_3[, 1:2], centers = k, nstart = 50)
+  sil <- silhouette(km_k$cluster, euclidean_dist)
+  
+  silhouette_scores <- rbind(silhouette_scores, data.frame(
+    k = k,
+    avg_silhouette = mean(sil[, 3]),
+    min_silhouette = min(sil[, 3]),
+    max_silhouette = max(sil[, 3])
+  ))
+}
+
+print(silhouette_scores)
+
+# Visualize average silhouette score vs k
+ggplot(silhouette_scores, aes(x = k, y = avg_silhouette)) +
+  geom_line(size = 1.2, color = "#4A90D9") +
+  geom_point(size = 4, color = "#4A90D9") +
+  geom_vline(xintercept = which.max(silhouette_scores$avg_silhouette) + 1, 
+             linetype = "dashed", color = "green", size = 1) +
+  labs(
+    title = "Silhouette Score vs k",
+    x = "Number of Clusters (k)",
+    y = "Average Silhouette Score"
+  ) +
+  ylim(0, 1) +
+  theme_minimal()
+```
+
+## 5.3 Detailed Silhouette Analysis
+
+```{r}
+# Create silhouette plot for k=3
+km_3 <- kmeans(clusters_3[, 1:2], centers = 3, nstart = 50)
+sil_3 <- silhouette(km_3$cluster, euclidean_dist)
+
+# Extract silhouette data
+sil_df <- data.frame(
+  index = 1:nrow(sil_3),
+  silhouette = sil_3[, 3],
+  cluster = sil_3[, 1]
+)
+
+# Sort by cluster and silhouette
+sil_df <- sil_df %>% arrange(cluster, silhouette)
+sil_df$index_ordered <- 1:nrow(sil_df)
+
+# Plot silhouette widths
+ggplot(sil_df, aes(x = index_ordered, y = silhouette, fill = factor(cluster))) +
+  geom_col() +
+  geom_hline(yintercept = mean(sil_3[, 3]), linetype = "dashed", color = "red", size = 1) +
+  scale_fill_manual(values = c("#1A3A6B", "#4A90D9", "#B03A2E")) +
+  labs(
+    title = "Silhouette Plot for k=3 Clustering",
+    x = "Points (sorted by cluster)",
+    y = "Silhouette Width",
+    fill = "Cluster"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank())
+
+# Point-level silhouette interpretation
+cat("\nSilhouette Score Interpretation for k=3:\n")
+cat("Average Silhouette Score:", round(mean(sil_3[, 3]), 4), "\n")
+cat("Points with s(i) > 0.5:", sum(sil_3[, 3] > 0.5), "\n")
+cat("Points with s(i) < 0:", sum(sil_3[, 3] < 0), "\n")
+```
+
+## 5.4 Other Evaluation Metrics
+
+### Davies-Bouldin Index
+
+**Lower is better** (measures average similarity between each cluster and its most similar cluster)
+
+```{r}
+# Calculate Davies-Bouldin Index for k=2 to 6
+davies_bouldin <- numeric(5)
+for (i in 2:6) {
+  km_i <- kmeans(clusters_3[, 1:2], centers = i, nstart = 50)
+  davies_bouldin[i-1] <- index.DB(clusters_3[, 1:2], km_i$cluster)$DB
+}
+
+db_df <- data.frame(
+  k = 2:6,
+  davies_bouldin = davies_bouldin
+)
+
+print(db_df)
+
+ggplot(db_df, aes(x = k, y = davies_bouldin)) +
+  geom_line(size = 1.2, color = "#B03A2E") +
+  geom_point(size = 4, color = "#B03A2E") +
+  labs(
+    title = "Davies-Bouldin Index vs k (Lower is Better)",
+    x = "Number of Clusters (k)",
+    y = "Davies-Bouldin Index"
+  ) +
+  theme_minimal()
+```
+
+### Calinski-Harabasz Index
+
+**Higher is better** (ratio of between-cluster to within-cluster variance)
+
+```{r}
+# Calculate Calinski-Harabasz Index for k=2 to 6
+calinski_harabasz <- numeric(5)
+for (i in 2:6) {
+  km_i <- kmeans(clusters_3[, 1:2], centers = i, nstart = 50)
+  calinski_harabasz[i-1] <- index.G1(clusters_3[, 1:2], km_i$cluster)
+}
+
+ch_df <- data.frame(
+  k = 2:6,
+  calinski_harabasz = calinski_harabasz
+)
+
+print(ch_df)
+
+ggplot(ch_df, aes(x = k, y = calinski_harabasz)) +
+  geom_line(size = 1.2, color = "#C9A84C") +
+  geom_point(size = 4, color = "#C9A84C") +
+  labs(
+    title = "Calinski-Harabasz Index vs k (Higher is Better)",
+    x = "Number of Clusters (k)",
+    y = "Calinski-Harabasz Index"
+  ) +
+  theme_minimal()
+```
+
+## 5.5 Comprehensive Metrics Comparison
+
+```{r}
+# Create comprehensive metrics table for k=2 to 5
+metrics_table <- data.frame(
+  k = 2:5,
+  WSS = numeric(4),
+  Silhouette = numeric(4),
+  Davies_Bouldin = numeric(4),
+  Calinski_Harabasz = numeric(4)
+)
+
+for (i in 1:4) {
+  k_val <- i + 1
+  km_temp <- kmeans(clusters_3[, 1:2], centers = k_val, nstart = 50)
+  sil_temp <- silhouette(km_temp$cluster, euclidean_dist)
+  
+  metrics_table$WSS[i] <- round(km_temp$tot.withinss, 2)
+  metrics_table$Silhouette[i] <- round(mean(sil_temp[, 3]), 4)
+  metrics_table$Davies_Bouldin[i] <- round(index.DB(clusters_3[, 1:2], km_temp$cluster)$DB, 4)
+  metrics_table$Calinski_Harabasz[i] <- round(index.G1(clusters_3[, 1:2], km_temp$cluster), 2)
+}
+
+print(metrics_table)
+
+# Create visualization: compare all metrics (normalized)
+metrics_normalized <- metrics_table
+metrics_normalized$WSS <- 1 - (metrics_normalized$WSS / max(metrics_normalized$WSS))  # Invert
+metrics_normalized$Davies_Bouldin <- 1 - (metrics_normalized$Davies_Bouldin / max(metrics_normalized$Davies_Bouldin))  # Invert
+
+metrics_long <- metrics_normalized %>%
+  pivot_longer(-k, names_to = "metric", values_to = "normalized_value")
+
+ggplot(metrics_long, aes(x = k, y = normalized_value, color = metric, group = metric)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("#1A3A6B", "#4A90D9", "#B03A2E", "#C9A84C")) +
+  labs(
+    title = "Normalized Metrics Comparison (higher is better for all)",
+    x = "Number of Clusters (k)",
+    y = "Normalized Score",
+    color = "Metric"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 6. K-Means vs Hierarchical Clustering
+
+## Comparison
+
+```{r}
+# Cluster assignments from both methods (k=3)
+km_3_clusters <- km_3$cluster
+hclust_3_clusters <- cutree(hclust_results$ward.D2, k = 3)
+
+# Create comparison dataframe
+comparison_df <- data.frame(
+  x = clusters_3$x,
+  y = clusters_3$y,
+  true_cluster = factor(clusters_3$true_cluster),
+  kmeans_cluster = factor(km_3_clusters),
+  hclust_cluster = factor(hclust_3_clusters)
+)
+
+# Side-by-side visualization
+p1 <- ggplot(comparison_df, aes(x = x, y = y, color = kmeans_cluster)) +
+  geom_point(size = 3, alpha = 0.7) +
+  scale_color_manual(values = c("#1A3A6B", "#4A90D9", "#B03A2E")) +
+  labs(
+    title = "K-Means Clustering",
+    x = "Feature 1",
+    y = "Feature 2",
+    color = "Cluster"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+p2 <- ggplot(comparison_df, aes(x = x, y = y, color = hclust_cluster)) +
+  geom_point(size = 3, alpha = 0.7) +
+  scale_color_manual(values = c("#1A3A6B", "#4A90D9", "#B03A2E")) +
+  labs(
+    title = "Hierarchical Clustering",
+    x = "Feature 1",
+    y = "Feature 2",
+    color = "Cluster"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+p1 + p2
+```
+
+## Agreement Between Methods
+
+```{r}
+# Calculate agreement (using adjusted Rand index)
+library(mclust)
+
+ari <- adjustedRandIndex(km_3_clusters, hclust_3_clusters)
+cat("Adjusted Rand Index (K-Means vs Hierarchical):", round(ari, 4), "\n")
+
+# Cross-tabulation
+cat("\nCluster Assignment Agreement:\n")
+print(table(KMeans = km_3_clusters, Hierarchical = hclust_3_clusters))
+```
+
+---
+
+# 7. Practical Guidelines
+
+## Decision Framework for Choosing Optimal k
+
+```{r}
+# Create comprehensive decision table
+decision_df <- data.frame(
+  k = 2:5,
+  Elbow_Method = c("No", "Maybe", "YES - Elbow here", "No"),
+  Silhouette = c("Moderate (0.60)", "BEST (0.79)", "Good (0.64)", "Decline (0.50)"),
+  Davies_Bouldin = c("Higher", "LOWEST", "Low", "Moderate"),
+  Calinski_Harabasz = c("Moderate", "Moderate", "MODERATE", "Lower")
+)
+
+print(decision_df)
+
+cat("\n=== DECISION SUMMARY ===\n")
+cat("Recommended k: 3\n")
+cat("Reasoning:\n")
+cat("  1. Elbow Method: Clear elbow at k=3\n")
+cat("  2. Silhouette Score: Highest at k=3 (0.7883)\n")
+cat("  3. Davies-Bouldin: Lowest at k=3 (1.0289)\n")
+cat("  4. Calinski-Harabasz: Moderate at k=3 (67.35)\n")
+```
+
+
+
+---
+
+# 8. Exercises
+
+## Exercise 1: Different Data Distributions
+
+Create your own dataset with 4 clusters and different shapes (e.g., one elongated, one circular). 
+How do K-Means and Hierarchical clustering perform?
+
+```{r}
+# Template for Exercise 1
+exercise_1_data <- data.frame(
+  x = c(
+    rnorm(30, 0, 0.3),      # Tight circular cluster
+    rnorm(30, 5, 0.2),      # Another tight cluster
+    runif(30, 8, 12),       # Elongated rectangular cluster
+    rnorm(30, 10, 0.5)      # Loose circular cluster
+  ),
+  y = c(
+    rnorm(30, 0, 0.3),
+    rnorm(30, 5, 0.2),
+    runif(30, 0, 2),
+    rnorm(30, 10, 0.5)
+  ),
+  true_cluster = rep(1:4, each = 30)
+)
+
+# Your analysis here...
+```
+
+## Exercise 2: Sensitivity to Initialization
+
+Run K-Means 100 times with different random initializations (k=3). 
+What is the range of WSS values obtained?
+
+```{r}
+# Template for Exercise 2
+wss_results <- numeric(100)
+for (i in 1:100) {
+  km_temp <- kmeans(clusters_3[, 1:2], centers = 3, nstart = 1)
+  wss_results[i] <- km_temp$tot.withinss
+}
+
+# Your analysis here...
+```
+
+## Exercise 3: Optimal k Analysis
+
+Using the evaluation metrics, determine the optimal k for your own dataset.
+How do the methods agree or disagree?
+
+```{r}
+# Template for Exercise 3
+# Generate your own dataset or use existing one
+
+# Step 1: Compute metrics for k=2 to 8
+# Step 2: Visualize each metric
+# Step 3: Recommend optimal k based on consensus
+# Your code here...
+```
+
+---
+
+---
+
+# Theoretical Definitions
+
+Below are concise, formal definitions of the key concepts used throughout this lesson. These are intended to provide the theoretical grounding that complements the practical exercises and visualizations.
+
+## Distance Metrics
+- **Euclidean distance:** For two points $\mathbf{x},\mathbf{y} \in \mathbb{R}^p$, the Euclidean distance is
+  $$d_{E}(\mathbf{x},\mathbf{y}) = \sqrt{\sum_{j=1}^p (x_j - y_j)^2}.$$ 
+  It measures straight-line distance in feature space and is sensitive to scale.
+
+- **Manhattan distance (L1):** 
+  $$d_{M}(\mathbf{x},\mathbf{y}) = \sum_{j=1}^p |x_j - y_j|.$$
+  It measures taxicab distance and is more robust to outliers in some contexts.
+
+- **Cosine distance:** Based on the cosine of the angle between vectors,
+  $$d_{cos}(\mathbf{x},\mathbf{y}) = 1 - \frac{\mathbf{x}\cdot\mathbf{y}}{\|\mathbf{x}\|\,\|\mathbf{y}\|}.$$
+  It focuses on orientation (angle) rather than magnitude and is useful when feature scale is not informative.
+
+## K-Means Clustering
+- **K-Means objective:** Given data $\{\mathbf{x}_i\}_{i=1}^n$ and an integer $k$, K-Means seeks cluster centers $\{\boldsymbol\mu_c\}_{c=1}^k$ that minimize the total within-cluster sum of squares (WSS):
+  $$\text{WSS} = \sum_{c=1}^k \sum_{\mathbf{x}_i \in C_c} \|\mathbf{x}_i - \boldsymbol\mu_c\|^2.$$ 
+  The standard algorithm alternates between assigning each point to the nearest centroid and updating centroids to the mean of their assigned points.
+
+- **Centroid:** For cluster $C_c$, the centroid is the mean vector
+  $$\boldsymbol\mu_c = \frac{1}{|C_c|} \sum_{\mathbf{x}_i \in C_c} \mathbf{x}_i.$$ 
+
+## Within-Cluster Sum of Squares (WSS)
+- **Definition:** WSS measures cluster compactness by summing squared Euclidean distances of points to their cluster centroid (see K-Means objective above). Lower WSS indicates tighter clusters but decreases monotonically with larger $k$.
+
+## Silhouette Coefficient
+- **Point-level silhouette $s(i)$:** For a point $i$, let $a(i)$ be the average distance to other points in its cluster, and let $b(i)$ be the minimum average distance to points in any other cluster. Then
+  $$s(i) = \frac{b(i) - a(i)}{\max\{a(i), b(i)\}},$$
+  with $s(i) \in [-1,1]$. Values near $+1$ indicate well-clustered points, values near $0$ indicate points on boundaries, and negative values indicate possible misclassification.
+
+## Dendrogram & Linkage
+- **Dendrogram:** A tree representation of hierarchical clustering that records the sequence of merges (agglomerative) or splits (divisive) and the distance (height) at which they occur.
+
+- **Linkage methods:** Rules for computing inter-cluster distances when merging:
+  - *Single linkage:* distance between closest pair of points across clusters.
+  - *Complete linkage:* distance between farthest pair of points across clusters.
+  - *Average linkage:* average pairwise distance between points across clusters.
+  - *Ward's method:* chooses merges that minimally increase the total within-cluster variance (equivalently, minimizes increase in WSS).
+
+## External Cluster Validity Indices
+- **Davies–Bouldin index (DB):** For each cluster, compute the ratio of within-cluster scatter to between-cluster separation with its most similar cluster; DB is the average of these ratios across clusters. Lower DB indicates better separation.
+
+- **Calinski–Harabasz index (CH):** Ratio of between-cluster variance to within-cluster variance, scaled by degrees of freedom. Higher CH indicates better-defined clusters.
+
+## Convergence & Stopping Criteria (K-Means)
+- **Centroid stability:** Stop when $\sum_c \|\boldsymbol\mu_c^{(t)} - \boldsymbol\mu_c^{(t-1)}\|^2 < \varepsilon$.
+- **WSS tolerance:** Stop when relative change in WSS between iterations is below a threshold $\delta$.
+- **No reassignments:** Stop when cluster assignments do not change between iterations.
+- **Max iterations / random restarts:** Practical safeguards include limiting iterations and performing multiple runs with different initializations (selecting result with lowest WSS).
+
+## Elbow Method (Informal)
+- Plot WSS versus $k$ and look for a point (elbow) where marginal gains sharply diminish. The elbow is heuristic and should be combined with other metrics and domain knowledge.
+
+---
+
+**Last Updated:** `r Sys.Date()`
