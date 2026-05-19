@@ -1,0 +1,374 @@
+---
+title: "Time Series Workshop: Trend, Smoothing, and ARIMA"
+author: "Applied Statistics"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+# Introduction
+
+This notebook walks through a hands-on workshop for a synthetic 24-month time series. We will:
+
+- define the data and its components,
+- visualize the series,
+- explore stationarity,
+- apply smoothing and exponential smoothing,
+- build an ARIMA model,
+- compare forecasts and prediction intervals.
+
+The goal is to turn each step into a concrete learning activity. We will alternate between explanation, code, and interpretation so the material is both practical and instructional.
+
+# 1. Data setup
+
+We start with the same synthetic 24-month series used in the deck.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 10, fig.height = 4)
+```
+
+```{r data-definition}
+series <- c(100, 103, 108, 112, 118, 121, 120, 117, 115, 113, 111, 114,
+            104, 107, 112, 116, 123, 126, 125, 122, 120, 118, 116, 119)
+months <- rep(c('J','F','M','A','M','J','J','A','S','O','N','D'), 2)
+time <- 1:length(series)
+
+year1 <- series[1:12]
+year2 <- series[13:24]
+
+data.frame(Month = months, Time = time, Value = series)
+```
+
+# 2. Series components
+
+This series is built from a trend component, a repeating seasonal pattern, and random variation. Understanding these pieces is the first step in choosing the right analysis.
+
+- Trend is the long-run upward movement.
+- Seasonality is the repeating calendar effect.
+- Random variation is the unpredictable leftover.
+
+```{r component-summary}
+trend <- 100 + 0.8 * time
+seasonal <- c(mean(year1[1], year2[1]), mean(year1[2], year2[2]),
+              mean(year1[3], year2[3]), mean(year1[4], year2[4]),
+              mean(year1[5], year2[5]), mean(year1[6], year2[6]),
+              mean(year1[7], year2[7]), mean(year1[8], year2[8]),
+              mean(year1[9], year2[9]), mean(year1[10], year2[10]),
+              mean(year1[11], year2[11]), mean(year1[12], year2[12]))
+seasonal_full <- rep(seasonal, 2)
+
+head(data.frame(Time = time, Series = series,
+                Trend = trend, Seasonal = seasonal_full))
+```
+
+This output shows the first few months of the series together with the trend and seasonal estimate. It helps us verify that the synthetic series behaves as intended.
+
+
+# 3. Diagnostics and visualization
+
+## 3.1 Raw series and trend
+
+This plot shows the raw 24-month series and the underlying linear trend that was embedded in the data. We use it to check whether the trend appears consistent and whether there are obvious deviations from the long-run path.
+
+```{r raw-series-plot}
+plot(time, series, type = 'o', col = 'navy', pch = 16, lwd = 2,
+     xlab = 'Month (t)', ylab = 'Value', main = 'Raw 24-Month Series',
+     ylim = c(95, 130))
+lines(time, trend, col = 'gold', lwd = 2, lty = 2)
+legend('topleft', legend = c('Observed', 'Trend'),
+       col = c('navy','gold'), lty = c(1,2), lwd = 2)
+```
+
+In the next step, we will test for stationarity by comparing the first and second year means.
+
+## 3.2 Year 1 vs Year 2 means
+
+A stationary series should have a roughly constant mean over time. Here we compare the average value from year 1 with the average from year 2 to see whether the mean is shifting.
+
+```{r stationarity-plot}
+year1_mean <- mean(year1)
+year2_mean <- mean(year2)
+plot(time, series, type = 'l', col = 'navy', lwd = 2,
+     xlab = 'Month (t)', ylab = 'Value', main = 'Year 1 vs Year 2 Means',
+     ylim = c(95, 130))
+lines(1:12, rep(year1_mean, 12), col = 'gold', lwd = 2, lty = 2)
+lines(13:24, rep(year2_mean, 12), col = 'red', lwd = 2, lty = 2)
+legend('topleft', legend = c('Series', 'Year1 mean', 'Year2 mean'),
+       col = c('navy', 'gold', 'red'), lty = c(1,2,2), lwd = 2)
+
+year1_mean; year2_mean
+```
+
+If the year means differ significantly, it is a sign the data are non-stationary and we should proceed to transform or detrend the series.
+
+## 3.3 Seasonal profile
+
+We average each calendar month across the two years to isolate the seasonal pattern. This helps reveal the repeating monthly cycle independently of the trend.
+
+```{r seasonal-profile}
+seasonal_avg <- (year1 + year2) / 2
+barplot(seasonal_avg, names.arg = month.abb,
+        col = 'darkgreen', main = 'Seasonal Profile: Average by Month',
+        ylim = c(100, 130), ylab = 'Average Value')
+```
+
+## 3.4 ACF and PACF
+
+```{r acf-pacf, fig.height=4.5}
+par(mfrow = c(1, 2))
+acf(series, lag.max = 20, main = 'ACF of Raw Series')
+pacf(diff(series), lag.max = 20, main = 'PACF of Differenced Series')
+par(mfrow = c(1, 1))
+```
+
+The ACF and PACF are diagnostic tools that help us choose the right ARIMA order. The ACF shows whether the series has persistence across many lags, while the PACF highlights the direct influence of each lag after removing shorter-lag effects.
+
+# 4. Moving average smoothing
+
+A simple moving average smooths the raw signal by averaging neighboring points. It is a useful first step to reduce noise and make the underlying pattern easier to see.
+
+```{r moving-average}
+ma3 <- stats::filter(series, rep(1/3, 3), sides = 1)
+plot(time, series, type = 'o', col = 'navy', pch = 16, lwd = 2,
+     xlab = 'Month (t)', ylab = 'Value', main = '3-Point Moving Average',
+     ylim = c(95, 130))
+lines(time, ma3, col = 'orange', lwd = 2)
+legend('topleft', legend = c('Series', '3-Point MA'), col = c('navy','orange'),
+       lty = c(1,1), lwd = 2)
+```
+
+This smoothing is not used for forecasting directly, but it helps us see the long-run shape of the data and evaluate how much short-term variation is present.
+
+# 5. Simple exponential smoothing (SES)
+
+SES is the next step after moving averages. It is a more flexible smoothing method because it gives more weight to recent observations, while still preserving prior information.
+
+SES uses the recursive formula:
+
+\[ S_t = \alpha y_t + (1 - \alpha) S_{t-1} \]
+
+This means the current smoothed level is a weighted combination of the current observation and the previous smoothed level.
+
+Let's compare two values of \(\alpha\) to see how responsiveness changes.
+
+```{r ses-definition}
+ses_level <- function(series, alpha) {
+  level <- numeric(length(series))
+  level[1] <- series[1]
+  for (t in 2:length(series)) {
+    level[t] <- alpha * series[t] + (1 - alpha) * level[t - 1]
+  }
+  level
+}
+
+ses_03 <- ses_level(series, 0.3)
+ses_07 <- ses_level(series, 0.7)
+```
+
+## 5.1 SES calculation example
+
+With \(\alpha = 0.3\) and initial level \(S_1 = 100\):
+
+- \(S_2 = 0.3 \times 103 + 0.7 \times 100 = 100.9\)
+- \(S_3 = 0.3 \times 108 + 0.7 \times 100.9 \approx 103.2\)
+
+```{r ses-example, echo=TRUE}
+alpha <- 0.3
+s1 <- series[1]
+s2 <- alpha * series[2] + (1 - alpha) * s1
+s3 <- alpha * series[3] + (1 - alpha) * s2
+s1; s2; s3
+```
+
+## 5.2 SES plots for different weights
+
+```{r ses-plots, fig.height=5}
+par(mfrow = c(1, 2))
+plot(time, series, type = 'o', col = 'navy', pch = 16, lwd = 2,
+     main = expression('SES level with ' * alpha * ' = 0.3'),
+     ylim = c(95, 130), xlab = 'Month (t)', ylab = 'Value')
+lines(time, ses_03, col = 'darkgreen', lwd = 2)
+plot(time, series, type = 'o', col = 'navy', pch = 16, lwd = 2,
+     main = expression('SES level with ' * alpha * ' = 0.7'),
+     ylim = c(95, 130), xlab = 'Month (t)', ylab = 'Value')
+lines(time, ses_07, col = 'darkgreen', lwd = 2)
+par(mfrow = c(1, 1))
+```
+
+Notice:
+
+- \(\alpha = 0.3\) produces a smoother, slower-moving level.
+- \(\alpha = 0.7\) reacts faster to recent changes.
+
+# 6. ARIMA modeling
+
+After exploring smoothing methods, we now move to a full time series modeling approach. ARIMA combines autoregression, differencing, and moving average structure to model the data explicitly.
+
+This section is where we move from descriptive smoothing to a predictive model. The goal is to build a model that can explain the autocorrelation in the data and produce a forecast with a confidence interval.
+
+## 6.1 Differencing and diagnostics
+
+Before fitting ARIMA, we first check whether the series requires differencing. If the data is non-stationary, differencing is the standard way to stabilize the mean.
+
+```{r differencing}
+diffs <- diff(series)
+plot(2:length(series), diffs, type='o', col='red', pch=16, lwd=2,
+     xlab='Month (t)', ylab='First Difference',
+     main='First Differences of the Series')
+abline(h = mean(diffs), lty = 2, col = 'gold')
+```
+
+When the original series is non-stationary, first differencing often stabilizes the mean. This step makes the data easier to model with ARIMA because it removes the trend and highlights the stationary dynamics.
+
+## 6.2 Fit ARIMA(1,1,1)
+
+We choose ARIMA(1,1,1) because the series requires one differencing step to remove trend, and the ACF/PACF diagnostics suggest low-order autoregressive and moving average structure.
+
+```{r arima-fit}
+fit <- arima(series, order = c(1, 1, 1), include.mean = TRUE)
+fit
+```
+
+The fitted output reports the estimated AR and MA coefficients, along with their standard errors. We will interpret these values and then use the model to forecast one step ahead.
+
+## 6.2.1 Comparing an alternative ARIMA hypothesis
+
+To test a different modeling hypothesis, we also fit ARIMA(2,1,1). This lets us compare whether adding one more AR term improves the fit.
+
+```{r arima-compare}
+fit_211 <- arima(series, order = c(2, 1, 1), include.mean = TRUE)
+
+comparison <- data.frame(
+  Model = c('ARIMA(1,1,1)', 'ARIMA(2,1,1)'),
+  AIC = c(AIC(fit), AIC(fit_211)),
+  LogLikelihood = c(logLik(fit), logLik(fit_211))
+)
+comparison
+
+fit_211
+```
+
+```{r arima-compare-visualization, fig.height=5}
+fitted_111 <- series - residuals(fit)
+fitted_211 <- series - residuals(fit_211)
+forecast_211 <- predict(fit_211, n.ahead = 1)
+pred_211 <- forecast_211$pred[1]
+se_211 <- forecast_211$se[1]
+
+plot(time, series, type = 'o', col = 'black', pch = 16, lwd = 2,
+     xlab = 'Month (t)', ylab = 'Value', main = 'Observed Series and ARIMA Fitted Values',
+     xlim = c(1, 25), ylim = range(series, fitted_111, fitted_211, pred, pred_211))
+lines(time, fitted_111, col = 'blue', lwd = 2, lty = 2)
+lines(time, fitted_211, col = 'red', lwd = 2, lty = 3)
+points(25, pred, col = 'blue', pch = 17, cex = 1.5)
+points(25, pred_211, col = 'red', pch = 15, cex = 1.5)
+arrows_111 <- arrows(25, pred - 1.96 * forecast$se[1], 25, pred + 1.96 * forecast$se[1],
+                     code = 3, angle = 90, length = 0.08, col = 'blue', lwd = 1.5)
+arrows_211 <- arrows(25, pred_211 - 1.96 * se_211, 25, pred_211 + 1.96 * se_211,
+                     code = 3, angle = 90, length = 0.08, col = 'red', lwd = 1.5)
+legend('topleft', legend = c('Observed', 'ARIMA(1,1,1)', 'ARIMA(2,1,1)',
+                             'Forecast 1,1,1', 'Forecast 2,1,1'),
+       col = c('black', 'blue', 'red', 'blue', 'red'),
+       lty = c(1, 2, 3, NA, NA), pch = c(16, NA, NA, 17, 15), lwd = c(2, 2, 2, NA, NA),
+       pt.cex = c(1, 1, 1, 1.5, 1.5), bty = 'n')
+```
+
+In this comparison, pay attention to:
+
+- whether `ARIMA(2,1,1)` lowers the AIC,
+- whether the new AR coefficient is significant,
+- whether the log likelihood improves enough to justify the extra parameter.
+
+If the improvement is small, the simpler ARIMA(1,1,1) may still be the better choice.
+
+From the results above, we see that `ARIMA(2,1,1)` produces coefficients that are very small relative to their standard errors. This means the extra `ar2` term is not strongly supported by the data, and the model is likely overfitting the series. The higher AIC for `ARIMA(2,1,1)` confirms that the simpler `ARIMA(1,1,1)` is preferred for this dataset.
+
+## 6.2.2 Interpreting the ARIMA coefficients
+
+The ARIMA output shows:
+
+- `ar1 = 0.4724`: the lag-1 autoregressive coefficient.
+  - This means the current value is partially explained by the immediately preceding value.
+  - A positive coefficient close to 0.5 indicates moderate persistence from one month to the next.
+- `ma1 = -0.1627`: the lag-1 moving average coefficient.
+  - This feature captures how the previous shock (forecast error) influences the current value.
+  - A negative coefficient means that positive shocks tend to be followed by negative adjustments.
+
+The standard errors tell us how uncertain these estimates are:
+
+- `s.e. 0.3722` for `ar1` means the estimate is not extremely precise.
+- `s.e. 0.3846` for `ma1` means the moving-average effect is also uncertain.
+
+In practice:
+
+- If the coefficient is much larger than its standard error, it is more likely to be a real effect.
+- Here, `ar1` is about 1.27 times its standard error, so it is only weakly significant.
+- The MA coefficient is smaller in magnitude and less clearly significant.
+
+These values suggest the series has some autoregressive memory, but the model is not highly confident about the exact dynamics.
+
+## 6.3 Forecast and 95% interval
+
+```{r arima-forecast}
+forecast <- predict(fit, n.ahead = 1)
+pred <- forecast$pred[1]
+se <- forecast$se[1]
+lower <- pred - 1.96 * se
+upper <- pred + 1.96 * se
+
+plot(time, series, type = 'o', col = 'navy', pch = 16, lwd = 2,
+     xlab = 'Month (t)', ylab = 'Value', main = 'ARIMA(1,1,1) Forecast',
+     ylim = c(95, max(series, upper) + 5))
+lines(c(24, 25), c(series[24], pred), col='orange', lwd=2, lty=2)
+points(25, pred, col='red', pch=16, cex=1.5)
+arrows <- arrows(25, lower, 25, upper, code = 3, angle = 90, length = 0.08,
+                  col='red', lwd=2)
+abline(v = 24.5, lty = 2, col = 'skyblue')
+legend('topleft', legend = c('Observed', 'Forecast', '95% CI'),
+       col = c('navy', 'orange', 'red'), lty = c(1,2,1), lwd = c(2,2,2))
+
+pred; lower; upper
+```
+
+The forecast step gives us a point estimate for month 25 and a confidence interval around that estimate. The interval captures the uncertainty inherent in the model and the data.
+
+# 7. Comparison and takeaway
+
+Now that we have both simple smoothing forecasts and a formal ARIMA forecast, we can compare methods side by side. This helps students understand when a simple benchmark is enough and when a more structured model adds value.
+
+## 7.1 SES vs ARIMA
+
+```{r compare-forecasts}
+# compare month-25 forecasts from SES and ARIMA
+ses_forecast_03 <- ses_03[length(ses_03)]
+ses_forecast_07 <- ses_07[length(ses_07)]
+
+data.frame(Method = c('SES α=0.3', 'SES α=0.7', 'ARIMA(1,1,1)'),
+           Forecast = c(ses_forecast_03, ses_forecast_07, pred))
+```
+
+## 7.2 Key workshop takeaways
+
+- Use moving averages for simple smoothing and noise reduction.
+- Simple Exponential Smoothing is a naive but useful benchmark.
+- Higher \(\alpha\) makes SES more responsive.
+- ARIMA can model autocorrelation and differencing explicitly.
+- Always compare a simple benchmark against a more complex model.
+
+# 8. Exercises
+
+1. Change the SES parameter to \(\alpha = 0.5\) and compare the level curve with the \(\alpha = 0.3\) and \(\alpha = 0.7\) curves.
+2. Fit `ARIMA(2,1,1)` and compare the forecast and residuals with `ARIMA(1,1,1)`.
+3. Compute the mean squared error of the SES forecast and the ARIMA forecast on the last observed month.
+
+# 9. Conclusion
+
+This notebook gives a complete, runnable workshop path from a synthetic series to smoothing, exponential smoothing, and ARIMA forecasting. The examples are designed to be adapted for a live lesson or interactive workshop.
+
+The intention is to help students build intuition step by step: from simple visual checks, through smoothing methods, to a formal ARIMA model and forecast comparison.
+
+If you want, the next version can also include a section on residual diagnostics, error metrics, and practical model selection rules.
